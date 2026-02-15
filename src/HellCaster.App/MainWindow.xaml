@@ -1,0 +1,186 @@
+﻿<Window x:Class="HellCaster.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="HellCaster: Neon Siege"
+        Width="1360"
+        Height="860"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#0E1118"
+        KeyDown="Window_KeyDown"
+        KeyUp="Window_KeyUp"
+        MouseMove="Window_MouseMove"
+        MouseDown="Window_MouseDown">
+    <Grid>
+        <Grid Name="PlayRoot" Visibility="Collapsed">
+            <Viewbox Name="GameViewport"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center">
+                <Canvas Name="GameCanvas"
+                        Width="1280"
+                        Height="720"
+                        Background="#111624" />
+            </Viewbox>
+
+            <Border HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="14"
+                    Background="#B4000000"
+                    Padding="10"
+                    CornerRadius="8">
+                <TextBlock Name="HudText"
+                           Foreground="#E8EFFF"
+                           FontSize="15"
+                           FontFamily="Consolas"
+                           Text="HUD"
+                           TextWrapping="Wrap" />
+            </Border>
+
+            <Border HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="14"
+                    Background="#B4000000"
+                    Padding="10"
+                    CornerRadius="8"
+                    Width="360">
+                <TextBlock Name="StatusText"
+                           Foreground="#D0DCFF"
+                           FontSize="13"
+                           FontFamily="Consolas"
+                           TextWrapping="Wrap"
+                           Text="Status" />
+            </Border>
+
+            <TextBlock Name="GameOverText"
+                       Visibility="Collapsed"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontFamily="Consolas"
+                       FontWeight="Bold"
+                       FontSize="40"
+                       Foreground="#FFFF7A7A"
+                       TextAlignment="Center"
+                       Text="SYSTEM FAILURE
+Press ESC" />
+        </Grid>
+
+        <Grid Name="MenuRoot" Background="#CC090C14">
+            <Border HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#E2192234"
+                    Padding="20"
+                    CornerRadius="10"
+                    Width="900">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="270" />
+                        <ColumnDefinition Width="20" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" VerticalAlignment="Top">
+                        <TextBlock Text="HellCaster"
+                                   Foreground="#FFFFFF"
+                                   FontSize="30"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,8" />
+                        <TextBlock Text="Neon Siege"
+                                   Foreground="#8FC4FF"
+                                   FontSize="18"
+                                   Margin="0,0,0,18" />
+
+                        <Button Name="NewGameButton" Content="New Campaign" Click="NewGameButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="LoadGameButton" Content="Load Saved Game" Click="LoadGameButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="SaveNowButton" Content="Manual Save" Click="SaveNowButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="OpenSettingsButton" Content="Settings" Click="OpenSettingsButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="OpenLeaderboardButton" Content="Leaderboard + Achievements" Click="OpenLeaderboardButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="ResumeButton" Content="Resume Game" Click="ResumeButton_Click" Margin="0,10,0,8" Height="34" />
+                        <Button Name="ExitButton" Content="Exit" Click="ExitButton_Click" Margin="0,0,0,8" Height="34" />
+                    </StackPanel>
+
+                    <Grid Grid.Column="2">
+                        <Grid Name="HomePanel">
+                            <StackPanel>
+                                <TextBlock Text="Campaign Briefing"
+                                           Foreground="#FFFFFF"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,12" />
+                                <TextBlock Name="HomeInfoText"
+                                           Foreground="#CFDCFF"
+                                           FontSize="14"
+                                           TextWrapping="Wrap"
+                                           Text="Start a run or load your autosaved checkpoint." />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Name="SettingsPanel" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Settings"
+                                           Foreground="#FFFFFF"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,12" />
+
+                                <TextBlock Text="Player Name" Foreground="#DCE8FF" />
+                                <TextBox Name="PlayerNameTextBox" Margin="0,4,0,10" />
+
+                                <TextBlock Text="Resolution" Foreground="#DCE8FF" />
+                                <ComboBox Name="ResolutionComboBox" Margin="0,4,0,10" />
+
+                                <TextBlock Text="Quality" Foreground="#DCE8FF" />
+                                <ComboBox Name="QualityComboBox" Margin="0,4,0,10" />
+
+                                <CheckBox Name="FullscreenCheckBox"
+                                          Content="Fullscreen"
+                                          Foreground="#DCE8FF"
+                                          Margin="0,2,0,10" />
+
+                                <TextBlock Text="Difficulty" Foreground="#DCE8FF" />
+                                <ComboBox Name="DifficultyComboBox" Margin="0,4,0,10" />
+
+                                <TextBlock Text="Campaign Seed (optional)" Foreground="#DCE8FF" />
+                                <TextBox Name="SeedTextBox" Margin="0,4,0,10" />
+
+                                <Button Content="Apply Settings" Click="ApplySettingsButton_Click" Height="34" Width="150" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Name="LeaderboardPanel" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Leaderboard"
+                                           Foreground="#FFFFFF"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,10" />
+
+                                <TextBlock Name="LeaderboardText"
+                                           Foreground="#F2FFBE"
+                                           FontFamily="Consolas"
+                                           FontSize="13"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,14" />
+
+                                <TextBlock Text="Achievements"
+                                           Foreground="#FFFFFF"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,10" />
+
+                                <TextBlock Name="AchievementsText"
+                                           Foreground="#BCE9FF"
+                                           FontFamily="Consolas"
+                                           FontSize="13"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,17 @@
+﻿# Build artifacts
+**/bin/
+**/obj/
+
+# User/local files
+.vs/
+*.user
+*.suo
+
+# Release temp output
+release/_publish_temp/
+
+# Release binaries
+release/*.exe
+release/latest/*.exe
+release/latest/*.pdb
+release/*.pdb

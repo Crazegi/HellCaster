@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HellCaster.App/HellCaster.App.csproj" />
+    <Project Path="src/HellCaster.Runtime/HellCaster.Runtime.csproj" />
+  </Folder>
+</Solution>
