@@ -1,240 +1,199 @@
-# HellCaster: Neon Siege
+<div align="center">
 
-HellCaster is a Doom-inspired first-person 2.5D shooter built with .NET 10, WPF, and a custom raycasting runtime.
+# 🔥 HellCaster: Neon Siege
 
-This project focuses on:
+### Retro Doom-style action shooter built with .NET 10 + WPF + custom raycasting
 
-- Fast iteration in pure C# (no external game engine)
-- Deterministic seeded campaign generation
-- Classic corridor/room combat loop
-- Lightweight release packaging for Windows
+<p>
+	<img src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10" />
+	<img src="https://img.shields.io/badge/UI-WPF-0C54C2?style=for-the-badge&logo=windows&logoColor=white" alt="WPF" />
+	<img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows" />
+	<img src="https://img.shields.io/badge/Renderer-2.5D%20Raycaster-EA4AAA?style=for-the-badge" alt="Raycaster" />
+	<img src="https://img.shields.io/badge/Status-Playable-2EA043?style=for-the-badge" alt="Playable" />
+</p>
 
----
+<p>
+	<a href="https://github.com/Crazegi/HellCaster/releases"><img src="https://img.shields.io/github/v/release/Crazegi/HellCaster?style=for-the-badge&label=Latest%20Release" alt="Latest Release" /></a>
+	<a href="https://github.com/Crazegi/HellCaster/releases"><img src="https://img.shields.io/github/downloads/Crazegi/HellCaster/total?style=for-the-badge&label=Downloads" alt="Downloads" /></a>
+	<a href="https://github.com/Crazegi/HellCaster"><img src="https://img.shields.io/github/last-commit/Crazegi/HellCaster?style=for-the-badge&label=Last%20Commit" alt="Last Commit" /></a>
+	<img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge" alt="GPLv3" />
+</p>
 
-## 1) Feature Overview
-
-### Core gameplay
-
-- First-person 2.5D raycast rendering with textured walls
-- Procedural level generation from campaign seed + level index
-- Objective loop per level:
-	- Reach kill target
-	- Activate/approach exit
-	- Advance to next level
-- Difficulty tiers: `Easy`, `Medium`, `Hard`, `Hell`
-- Enemy variants:
-	- `enemy` (standard)
-	- `enemy-scout` (faster, lighter)
-	- `enemy-brute` (slower, heavier)
-
-### Progression and persistence
-
-- Autosave on checkpoints and level transitions
-- Manual save/load from menu
-- Leaderboard tracking by score and highest level
-- Challenge + achievement state persistence
-
-### Rendering and UX
-
-- External wall texture support (`jpg/png/jpeg`)
-- Quality presets (`Low`, `Medium`, `High`, `Ultra`)
-- POV/FOV selection from settings
-- Fullscreen toggle + windowed resizing/maximize support
-- Mouse-look and keyboard fallback turning
+</div>
 
 ---
 
-## 2) Technology Stack
+## ✨ Why HellCaster?
 
-- **Runtime/UI**: .NET 10 + WPF (`net10.0-windows`)
-- **Language**: C#
-- **Rendering model**:
-	- CPU raycasting in runtime
-	- WPF canvas + bitmap compositing for scene rendering
-- **Storage**: JSON files in `%LOCALAPPDATA%/HellCaster`
-- **Packaging**: PowerShell release pipeline (`release.ps1`)
+HellCaster is a custom-built first-person shooter that delivers classic corridor combat vibes with modern convenience systems.
 
----
-
-## 3) Repository Layout
-
-- `HellCaster.slnx` — solution root
-- `src/HellCaster.App` — WPF app (menu/input/render orchestration)
-- `src/HellCaster.Runtime` — game engine, world simulation, generation, persistence models
-- `release.ps1` — clean publish/release script
-- `release/` — latest packaged output (generated)
-
-Important app files:
-
-- `src/HellCaster.App/MainWindow.xaml` — UI layout and menu panels
-- `src/HellCaster.App/MainWindow.xaml.cs` — frame loop, rendering, menu flow, input handling
-- `src/HellCaster.App/Textures/` — texture assets + texture usage README
-
-Important runtime files:
-
-- `src/HellCaster.Runtime/GameEngine.cs` — simulation + raycasting + snapshots
-- `src/HellCaster.Runtime/LevelGenerator.cs` — procedural level generation
-- `src/HellCaster.Runtime/Models.cs` — shared records/enums/settings/snapshot models
-- `src/HellCaster.Runtime/PersistenceService.cs` — save/settings/leaderboard JSON I/O
+- ⚡ **Fast runtime** with optimized bitmap scene rendering
+- 🧱 **Real wall textures** from external JPG/PNG assets
+- 🧠 **Seeded procedural levels** with rooms, corridors, checkpoints, and objective flow
+- 💾 **Persistent saves, settings, leaderboard, achievements/challenges**
+- 🛠️ **One-command release pipeline** producing clean latest builds
 
 ---
 
-## 4) Run Locally (Dev)
+## 🚀 Quick Start
 
-From repository root:
+### 1) Build + run (development)
 
 ```powershell
 dotnet build HellCaster.slnx
 dotnet run --project src/HellCaster.App/HellCaster.App.csproj
 ```
 
-Requirements:
-
-- Windows with .NET SDK 10 installed
-
----
-
-## 5) Controls
-
-- `W/S` — move forward/backward
-- `A/D` — strafe left/right
-- `Q/E` or `Left/Right` — turn
-- `Mouse` — horizontal look
-- `Left Click` or `Space` — fire
-- `F` — interact (e.g. advance at exit once objective complete)
-- `R` — restart after game over
-- `Esc` — open menu
-
-Input behavior note:
-
-- While menu is open, gameplay simulation/fire input is paused (UI click does not shoot).
-
----
-
-## 6) Settings and Configuration
-
-Menu settings currently include:
-
-- Player name
-- Resolution
-- Quality preset
-- POV/FOV value
-- Fullscreen toggle
-- Difficulty
-- Optional campaign seed
-
-Settings are persisted and reloaded automatically.
-
----
-
-## 7) Save/State Files
-
-Data location:
-
-- `%LOCALAPPDATA%/HellCaster/settings.json`
-- `%LOCALAPPDATA%/HellCaster/savegame.json`
-- `%LOCALAPPDATA%/HellCaster/leaderboard.json`
-
-Data categories:
-
-- **Settings**: display, controls-related options, difficulty/profile
-- **Savegame**: run snapshot (seed, level, player state, score, objectives)
-- **Leaderboard**: top runs and timestamps
-
----
-
-## 8) Texture System (External Images)
-
-HellCaster supports external wall textures loaded at runtime.
-
-Supported filenames:
-
-- `wall_brick.jpg|png|jpeg`
-- `wall_concrete.jpg|png|jpeg`
-- `wall_metal.jpg|png|jpeg`
-
-Search paths:
-
-1. `AppBase/Textures/`
-2. `AppBase/latest/Textures/`
-3. `CurrentWorkingDirectory/Textures/`
-
-Development placement:
-
-- `src/HellCaster.App/Textures/`
-
-Packaged release placement:
-
-- `release/latest/Textures/`
-
-If files are missing or invalid, built-in fallback textures are used.
-
-Recommended texture specs:
-
-- Square images (`128x128` or `256x256`)
-- Seamless/tileable patterns for best visual continuity
-
----
-
-## 9) Rendering Pipeline (Advanced)
-
-At a high level each frame:
-
-1. Runtime updates simulation (input, movement, bullets, enemies, objectives)
-2. Runtime raycasts walls and emits a `GameSnapshot`
-3. App renders:
-	 - Scene base (sky/floor/walls) into a reusable bitmap layer
-	 - Sprites/projectiles/UI overlays on top
-
-Key rendering properties:
-
-- DDA-based wall ray traversal for stable wall intersection
-- Side-aware UV mapping for consistent texture attachment
-- Bilinear texture sampling for smoother wall surfaces
-- Proper FOV-based projection-plane scaling to avoid fake lens effects
-
----
-
-## 10) Procedural Generation (Advanced)
-
-Generation strategy combines:
-
-- Maze carving for navigable backbone
-- Corridor widening for combat flow
-- Room carving with overlap constraints
-- Start/exit path validation and checkpoint placement
-
-Level determinism:
-
-- Level seed derived from campaign seed + level index
-- Same seed + difficulty combination reproduces the same level layout
-
----
-
-## 11) Build and Release Workflow
-
-### Standard release
+### 2) Build distributable release
 
 ```powershell
 .\release.ps1
 ```
 
-Per run, script behavior:
+### 3) Launch the game
 
-1. Cleans old release outputs
-2. Publishes fresh self-contained Windows build
-3. Produces launcher:
-	 - `release/HellCaster-latest.exe`
-4. Recreates clean publish folder:
-	 - `release/latest/`
-5. Writes metadata:
-	 - `release/latest.json`
+- ✅ Use: `release/HellCaster-latest.exe`
+- 📦 Raw publish output: `release/latest/`
 
-Use this executable for play:
+---
 
-- `release/HellCaster-latest.exe`
+## 🎮 Controls
 
-### Optional variants
+| Action | Input |
+|---|---|
+| Move forward/backward | `W / S` |
+| Strafe left/right | `A / D` |
+| Turn | `Q / E` or `← / →` |
+| Mouse look | `Mouse X` |
+| Shoot | `Left Click` or `Space` |
+| Interact/advance exit | `F` |
+| Restart after death | `R` |
+| Open menu | `Esc` |
+
+> 🛡️ Menu safety: when menu is open, world update/fire input is paused.
+
+---
+
+## 🧩 Feature Matrix
+
+| Category | Included |
+|---|---|
+| Rendering | DDA raycasting, side-aware UVs, bilinear wall sampling, projection-plane scaling |
+| Gameplay | Enemy variants, projectile combat, objective+exit progression |
+| World Gen | Seeded maze+rooms, corridor widening, checkpoint pathing |
+| Progression | Difficulty tiers, level advancement, score tracking |
+| Persistence | Save/load, autosave, settings, leaderboard, achievements/challenges |
+| UX | Fullscreen/windowed, resize+maximize, quality presets, POV/FOV setting |
+
+---
+
+## 🧰 Tech Stack Cards
+
+<table>
+	<tr>
+		<td align="center" width="25%"><strong>🟣 .NET 10</strong><br/>Runtime and tooling foundation</td>
+		<td align="center" width="25%"><strong>🪟 WPF</strong><br/>Desktop UI, menu flow, overlays</td>
+		<td align="center" width="25%"><strong>🎯 Custom Raycaster</strong><br/>DDA walls + UV mapping + projection</td>
+		<td align="center" width="25%"><strong>⚙️ PowerShell Release</strong><br/>Single-command clean packaging</td>
+	</tr>
+	<tr>
+		<td align="center"><strong>🧠 Engine Core</strong><br/>Simulation loop, AI, combat, progression</td>
+		<td align="center"><strong>🧱 Texture Loader</strong><br/>External JPG/PNG wall materials</td>
+		<td align="center"><strong>💾 JSON Persistence</strong><br/>Save/settings/leaderboard storage</td>
+		<td align="center"><strong>🗺️ ProcGen</strong><br/>Seeded rooms, corridors, checkpoints</td>
+	</tr>
+</table>
+
+---
+
+## 🧱 Texture Pipeline (External Assets)
+
+Drop texture files using these names:
+
+- `wall_brick.jpg` (or `.png` / `.jpeg`)
+- `wall_concrete.jpg` (or `.png` / `.jpeg`)
+- `wall_metal.jpg` (or `.png` / `.jpeg`)
+
+### Search order
+
+1. `AppBase/Textures/`
+2. `AppBase/latest/Textures/`
+3. `CurrentWorkingDirectory/Textures/`
+
+### Recommended texture format
+
+- Square and tileable textures (best: `128x128` or `256x256`)
+- Strong contrast for retro look
+- Avoid perspective photos (flat wall scans are ideal)
+
+If an image is missing or invalid, built-in fallback textures are used.
+
+---
+
+## 🛠️ Settings
+
+From menu:
+
+- 👤 Player Name
+- 🖥️ Resolution
+- 🎚️ Quality (`Low`, `Medium`, `High`, `Ultra`)
+- 👁️ POV/FOV
+- 🪟 Fullscreen toggle
+- 💀 Difficulty (`Easy`, `Medium`, `Hard`, `Hell`)
+- 🔢 Optional campaign seed
+
+---
+
+## 🧠 Architecture (Advanced)
+
+### Project structure
+
+- `src/HellCaster.App` → WPF app, input loop, UI, render composition
+- `src/HellCaster.Runtime` → engine simulation, raycasting, level generation, models/persistence services
+
+### Frame flow
+
+1. Read input and update simulation
+2. Runtime raycasts walls and emits `GameSnapshot`
+3. App draws scene bitmap (sky/floor/walls)
+4. App overlays sprites/projectiles/HUD/effects
+
+### Key engine techniques
+
+- DDA grid traversal for stable wall intersections
+- Side-aware texture coordinate mapping
+- Proper projection-plane distance from FOV
+- Snapshot-based decoupling between engine and renderer
+
+---
+
+## 💾 Data Persistence
+
+Stored under:
+
+- `%LOCALAPPDATA%/HellCaster/settings.json`
+- `%LOCALAPPDATA%/HellCaster/savegame.json`
+- `%LOCALAPPDATA%/HellCaster/leaderboard.json`
+
+---
+
+## 📦 Release Workflow
+
+Run:
+
+```powershell
+.\release.ps1
+```
+
+What it does:
+
+1. Cleans previous release outputs
+2. Publishes fresh self-contained build
+3. Outputs launcher: `release/HellCaster-latest.exe`
+4. Recreates clean raw folder: `release/latest/`
+5. Writes build metadata: `release/latest.json`
+
+Optional variants:
 
 ```powershell
 .\release.ps1 -Configuration Release -Runtime win-x64
@@ -243,69 +202,51 @@ Use this executable for play:
 
 ---
 
-## 12) Performance Notes
+## ⚡ Performance Tips
 
-Performance-critical paths:
-
-- Raycast count (`RayCount`) scales by quality/resolution
-- Scene rendering uses a reusable bitmap to reduce WPF shape overhead
-- Texture sampling uses cached downscaled arrays (`WallTextureSize` grid)
-
-If FPS is low:
-
-1. Lower quality preset
-2. Lower resolution
-3. Reduce POV/FOV (wide FOV increases visible wall complexity)
+- Lower quality first, then resolution
+- Lower POV/FOV if scene feels too heavy
+- Keep textures tileable and moderate resolution
 
 ---
 
-## 13) Troubleshooting
+## 🧯 Troubleshooting
 
-### Textures do not appear
+<details>
+<summary><strong>Textures not visible</strong></summary>
 
-- Verify filenames exactly:
-	- `wall_brick.*`, `wall_concrete.*`, `wall_metal.*`
-- Check files exist in `release/latest/Textures/` after `release.ps1`
-- Ensure files are valid images (non-corrupt jpg/png)
+- Confirm filenames exactly (`wall_brick.*`, `wall_concrete.*`, `wall_metal.*`)
+- Verify files exist in `release/latest/Textures/` after release build
+- Ensure image files open normally (not corrupted)
 
-### Distorted/warping wall visuals
+</details>
 
-- Confirm you are running latest executable from `release/HellCaster-latest.exe`
-- Check POV/FOV is not set excessively high
+<details>
+<summary><strong>Visual distortion near edges</strong></summary>
 
-### Menu click fires weapon
+- Reduce POV/FOV in settings
+- Ensure latest executable is used: `release/HellCaster-latest.exe`
 
-- Fixed in current build: gameplay input is paused while menu is visible
+</details>
 
----
+<details>
+<summary><strong>Menu clicks triggering gameplay input</strong></summary>
 
-## 14) Development Workflow
+- Current build blocks world updates and fire while menu is visible
 
-Typical iteration loop:
-
-```powershell
-dotnet build HellCaster.slnx
-dotnet run --project src/HellCaster.App/HellCaster.App.csproj
-```
-
-For distributable build:
-
-```powershell
-.\release.ps1
-```
+</details>
 
 ---
 
-## 15) Roadmap Ideas
+## 🗺️ Roadmap
 
-- Texture pack selector in settings
-- Normal/specular shading for walls
-- Better sprite animation system
-- Audio pipeline (ambient + weapon + enemy events)
-- Save-slot management instead of single save file
+- 🎨 Texture pack selector in settings
+- 🔊 Audio pipeline (SFX + ambience)
+- 🧍 Better sprite animation / enemy feedback
+- 🧪 Optional renderer backend for fully polygonal 3D
 
 ---
 
-## 16) License and Usage
+## 📄 License
 
-No explicit license file is currently included in this repository. If you plan to distribute or accept external contributions, add a license file and contribution policy.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
