@@ -15,3 +15,4 @@ release/*.exe
 release/latest/*.exe
 release/latest/*.pdb
 release/*.pdb
+release/latest/**

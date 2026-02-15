@@ -36,10 +36,12 @@ public sealed class GameEngine
 
     private float[] rayDistances = [];
     private float[] rayShades = [];
+    private float[] rayTextureU = [];
+    private int[] rayMaterialIds = [];
 
     private Player player = new(0f, 0f, PlayerRadius, 100, 0f);
 
-    public float Fov { get; } = 1.0f;
+    public float Fov { get; private set; } = 74f * (MathF.PI / 180f);
     public int RayCount { get; private set; } = 320;
     public float WorldWidth => currentLevel.Width * TileSize;
     public float WorldHeight => currentLevel.Height * TileSize;
@@ -85,15 +87,33 @@ public sealed class GameEngine
     {
         var qualityBase = settings.Quality switch
         {
-            QualityMode.Low => 220,
-            QualityMode.Medium => 300,
-            QualityMode.High => 380,
-            _ => 500
+            QualityMode.Low => 120,
+            QualityMode.Medium => 180,
+            QualityMode.High => 280,
+            _ => 380
         };
 
-        RayCount = Math.Clamp(Math.Max(qualityBase, settings.ScreenWidth / 4), 220, 620);
+        var widthDriven = settings.Quality switch
+        {
+            QualityMode.Low => settings.ScreenWidth / 9,
+            QualityMode.Medium => settings.ScreenWidth / 7,
+            QualityMode.High => settings.ScreenWidth / 6,
+            _ => settings.ScreenWidth / 5
+        };
+
+        RayCount = settings.Quality switch
+        {
+            QualityMode.Low => Math.Clamp(Math.Max(qualityBase, widthDriven), 96, 180),
+            QualityMode.Medium => Math.Clamp(Math.Max(qualityBase, widthDriven), 150, 260),
+            QualityMode.High => Math.Clamp(Math.Max(qualityBase, widthDriven), 220, 380),
+            _ => Math.Clamp(Math.Max(qualityBase, widthDriven), 300, 520)
+        };
+
+        Fov = Math.Clamp(settings.PovDegrees, 60f, 110f) * (MathF.PI / 180f);
         rayDistances = new float[RayCount];
         rayShades = new float[RayCount];
+        rayTextureU = new float[RayCount];
+        rayMaterialIds = new int[RayCount];
     }
 
     public SaveGameData CreateSaveData(string playerName)
@@ -178,6 +198,8 @@ public sealed class GameEngine
             bullets.Select(b => new BulletView(b.X, b.Y, b.Radius, b.VelocityX, b.VelocityY, b.Life)).ToArray(),
             rayDistances.ToArray(),
             rayShades.ToArray(),
+            rayTextureU.ToArray(),
+            rayMaterialIds.ToArray(),
             sprites,
             player.Angle,
             Fov,
@@ -227,6 +249,8 @@ public sealed class GameEngine
         {
             rayDistances = new float[RayCount];
             rayShades = new float[RayCount];
+            rayTextureU = new float[RayCount];
+            rayMaterialIds = new int[RayCount];
         }
 
         shootTimer = 0f;
@@ -616,31 +640,115 @@ public sealed class GameEngine
     {
         var startAngle = player.Angle - Fov / 2f;
         var angleStep = Fov / (RayCount - 1);
+        var playerMapX = player.X / TileSize;
+        var playerMapY = player.Y / TileSize;
 
         for (var i = 0; i < RayCount; i++)
         {
             var rayAngle = startAngle + i * angleStep;
-            var cos = MathF.Cos(rayAngle);
-            var sin = MathF.Sin(rayAngle);
-            var dist = 1f;
+            var rayDirX = MathF.Cos(rayAngle);
+            var rayDirY = MathF.Sin(rayAngle);
 
-            while (dist < MaxRayDistance)
+            var mapX = (int)MathF.Floor(playerMapX);
+            var mapY = (int)MathF.Floor(playerMapY);
+
+            var deltaDistX = MathF.Abs(rayDirX) < 0.0001f ? 1_000_000f : MathF.Abs(1f / rayDirX);
+            var deltaDistY = MathF.Abs(rayDirY) < 0.0001f ? 1_000_000f : MathF.Abs(1f / rayDirY);
+
+            int stepX;
+            int stepY;
+            float sideDistX;
+            float sideDistY;
+
+            if (rayDirX < 0f)
             {
-                var sampleX = player.X + cos * dist;
-                var sampleY = player.Y + sin * dist;
-
-                if (IsWallAt(sampleX, sampleY, 1f))
-                {
-                    break;
-                }
-
-                dist += 2.5f;
+                stepX = -1;
+                sideDistX = (playerMapX - mapX) * deltaDistX;
+            }
+            else
+            {
+                stepX = 1;
+                sideDistX = (mapX + 1f - playerMapX) * deltaDistX;
             }
 
-            var corrected = dist * MathF.Cos(rayAngle - player.Angle);
-            corrected = MathF.Max(0.001f, corrected);
+            if (rayDirY < 0f)
+            {
+                stepY = -1;
+                sideDistY = (playerMapY - mapY) * deltaDistY;
+            }
+            else
+            {
+                stepY = 1;
+                sideDistY = (mapY + 1f - playerMapY) * deltaDistY;
+            }
+
+            var side = 0;
+            var hit = false;
+            var hitWallMaterial = 1;
+
+            for (var guard = 0; guard < 256; guard++)
+            {
+                if (sideDistX < sideDistY)
+                {
+                    sideDistX += deltaDistX;
+                    mapX += stepX;
+                    side = 0;
+                }
+                else
+                {
+                    sideDistY += deltaDistY;
+                    mapY += stepY;
+                    side = 1;
+                }
+
+                var material = GetMap(mapX, mapY);
+                if (material != 0)
+                {
+                    hitWallMaterial = material;
+                    hit = true;
+                    break;
+                }
+            }
+
+            var perpWallDist = MaxRayDistance / TileSize;
+            if (hit)
+            {
+                var safeRayDirX = MathF.Abs(rayDirX) < 0.0001f
+                    ? (rayDirX < 0f ? -0.0001f : 0.0001f)
+                    : rayDirX;
+                var safeRayDirY = MathF.Abs(rayDirY) < 0.0001f
+                    ? (rayDirY < 0f ? -0.0001f : 0.0001f)
+                    : rayDirY;
+
+                if (side == 0)
+                {
+                    perpWallDist = (mapX - playerMapX + (1 - stepX) * 0.5f) / safeRayDirX;
+                }
+                else
+                {
+                    perpWallDist = (mapY - playerMapY + (1 - stepY) * 0.5f) / safeRayDirY;
+                }
+
+                perpWallDist = MathF.Abs(perpWallDist);
+            }
+
+            var corrected = MathF.Max(0.001f, perpWallDist * TileSize);
             rayDistances[i] = corrected;
             rayShades[i] = Math.Clamp(1f - corrected / MaxRayDistance, 0.15f, 1f);
+
+            var wallX = side == 0
+                ? playerMapY + perpWallDist * rayDirY
+                : playerMapX + perpWallDist * rayDirX;
+            wallX -= MathF.Floor(wallX);
+
+            var texU = wallX;
+            if ((side == 0 && rayDirX > 0f) || (side == 1 && rayDirY < 0f))
+            {
+                texU = 1f - wallX;
+            }
+
+            rayTextureU[i] = Math.Clamp(texU, 0f, 1f);
+            rayMaterialIds[i] = Math.Clamp(hitWallMaterial, 1, 3);
         }
 
         var spriteList = new List<SpriteRenderView>();

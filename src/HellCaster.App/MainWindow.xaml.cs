@@ -1,19 +1,32 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using HellCaster.Runtime;
+using IOPath = System.IO.Path;
 
 namespace HellCaster.App;
 
 public partial class MainWindow : Window
 {
+    private const float WallWorldSize = 64f;
+    private const int WallTextureSize = 128;
+
     private readonly GameEngine game = new();
     private readonly DispatcherTimer timer;
     private readonly HashSet<Key> pressed = [];
     private readonly PersistenceService persistence;
+    private readonly Dictionary<int, Color[]> wallTexturePresets = [];
+    private readonly string[] textureSearchDirs =
+    [
+        IOPath.Combine(AppContext.BaseDirectory, "Textures"),
+        IOPath.Combine(AppContext.BaseDirectory, "latest", "Textures"),
+        IOPath.Combine(Environment.CurrentDirectory, "Textures")
+    ];
 
     private readonly List<LeaderboardEntry> leaderboard;
     private GameSettings settings;
@@ -23,10 +36,18 @@ public partial class MainWindow : Window
     private bool hasMouseSample;
     private double previousMouseX;
     private bool isFullscreenApplied;
+    private Rect restoreWindowBounds;
+    private WriteableBitmap? sceneBitmap;
+    private byte[]? scenePixels;
+    private Image? sceneImage;
+    private int sceneWidth;
+    private int sceneHeight;
 
     public MainWindow()
     {
         InitializeComponent();
+        InitializeWallTexturePresets();
+        LoadExternalWallTextures();
 
         persistence = new PersistenceService(PersistenceService.GetDefaultRoot());
         settings = persistence.LoadSettings();
@@ -40,7 +61,9 @@ public partial class MainWindow : Window
 
         timer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(16)
+            Interval = settings.Quality == QualityMode.Low
+                ? TimeSpan.FromMilliseconds(22)
+                : TimeSpan.FromMilliseconds(16)
         };
         timer.Tick += Tick;
 
@@ -58,11 +81,23 @@ public partial class MainWindow : Window
         ResolutionComboBox.ItemsSource = new[] { "960x540", "1280x720", "1600x900", "1920x1080" };
         DifficultyComboBox.ItemsSource = Enum.GetNames<DifficultyMode>();
         QualityComboBox.ItemsSource = Enum.GetNames<QualityMode>();
+        PovComboBox.ItemsSource = new[] { "60", "68", "74", "82", "90", "100", "110" };
 
         PlayerNameTextBox.Text = settings.PlayerName;
         ResolutionComboBox.SelectedItem = $"{settings.ScreenWidth}x{settings.ScreenHeight}";
+        if (ResolutionComboBox.SelectedItem is null)
+        {
+            ResolutionComboBox.SelectedItem = "1280x720";
+        }
+
         DifficultyComboBox.SelectedItem = settings.Difficulty.ToString();
         QualityComboBox.SelectedItem = settings.Quality.ToString();
+        PovComboBox.SelectedItem = ((int)MathF.Round(settings.PovDegrees)).ToString();
+        if (PovComboBox.SelectedItem is null)
+        {
+            PovComboBox.SelectedItem = "74";
+        }
+
         FullscreenCheckBox.IsChecked = settings.Fullscreen;
         SeedTextBox.Text = string.Empty;
 
@@ -75,7 +110,7 @@ public partial class MainWindow : Window
         var dt = (float)(now - lastFrameTime).TotalSeconds;
         lastFrameTime = now;
 
-        if (!inGame)
+        if (!inGame || MenuRoot.Visibility == Visibility.Visible)
         {
             return;
         }
@@ -87,6 +122,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        var allowMouseFire = MenuRoot.Visibility != Visibility.Visible && Mouse.LeftButton == MouseButtonState.Pressed;
         var input = new InputState(
             pressed.Contains(Key.W),
             pressed.Contains(Key.S),
@@ -95,7 +131,7 @@ public partial class MainWindow : Window
             pressed.Contains(Key.Left) || pressed.Contains(Key.Q),
             pressed.Contains(Key.Right) || pressed.Contains(Key.E),
             mouseTurnAccumulator,
-            pressed.Contains(Key.Space) || Mouse.LeftButton == MouseButtonState.Pressed,
+            pressed.Contains(Key.Space) || allowMouseFire,
             pressed.Contains(Key.F));
 
         mouseTurnAccumulator = 0f;
@@ -107,15 +143,23 @@ public partial class MainWindow : Window
             persistence.SaveGame(autosave);
         }
 
-        Render(game.GetSnapshot());
+        var updatedSnapshot = game.GetSnapshot();
+        Render(updatedSnapshot);
     }
 
     private void Render(GameSnapshot snapshot)
     {
-        GameCanvas.Children.Clear();
+        var renderWidth = Math.Max(1, (int)Math.Round(GameCanvas.Width));
+        var renderHeight = Math.Max(1, (int)Math.Round(GameCanvas.Height));
+        EnsureSceneLayer(renderWidth, renderHeight);
+        DrawSceneToBitmap(snapshot, renderWidth, renderHeight);
 
-        DrawSkyAndFloor();
-        DrawWalls(snapshot);
+        GameCanvas.Children.Clear();
+        if (sceneImage is not null)
+        {
+            GameCanvas.Children.Add(sceneImage);
+        }
+
         DrawSprites(snapshot);
         DrawProjectiles(snapshot);
         DrawCrosshair();
@@ -155,6 +199,123 @@ public partial class MainWindow : Window
         }
     }
 
+    private void EnsureSceneLayer(int width, int height)
+    {
+        if (sceneBitmap is not null && scenePixels is not null && sceneWidth == width && sceneHeight == height)
+        {
+            return;
+        }
+
+        sceneWidth = width;
+        sceneHeight = height;
+        sceneBitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
+        scenePixels = new byte[width * height * 4];
+        sceneImage = new Image
+        {
+            Width = width,
+            Height = height,
+            Source = sceneBitmap,
+            Stretch = Stretch.Fill,
+            SnapsToDevicePixels = true
+        };
+    }
+
+    private void DrawSceneToBitmap(GameSnapshot snapshot, int width, int height)
+    {
+        if (sceneBitmap is null || scenePixels is null)
+        {
+            return;
+        }
+
+        var pixels = scenePixels;
+        FillSkyAndFloor(pixels, width, height);
+
+        var rays = snapshot.WallDistances;
+        var shades = snapshot.WallShades;
+        var textureU = snapshot.WallTextureU;
+        var materials = snapshot.WallMaterialIds;
+
+        if (rays.Count > 0)
+        {
+            var columnWidth = (double)width / rays.Count;
+            var fov = Math.Clamp(snapshot.Fov, 0.35f, 2.4f);
+            var projectionPlane = (float)(width * 0.5 / Math.Tan(fov * 0.5));
+
+            for (var i = 0; i < rays.Count; i++)
+            {
+                var dist = Math.Max(0.01f, rays[i]);
+                var wallHeight = Math.Clamp((WallWorldSize / dist) * projectionPlane, 8f, (float)height * 1.4f);
+                var top = (height - wallHeight) * 0.5f;
+                var bottom = top + wallHeight;
+
+                var x0 = Math.Clamp((int)Math.Floor(i * columnWidth), 0, width - 1);
+                var x1 = Math.Clamp((int)Math.Ceiling((i + 1) * columnWidth), x0 + 1, width);
+                var y0 = Math.Clamp((int)Math.Floor(top), 0, height - 1);
+                var y1 = Math.Clamp((int)Math.Ceiling(bottom), y0 + 1, height);
+
+                var u = i < textureU.Count ? textureU[i] : 0f;
+                var material = i < materials.Count ? materials[i] : 1;
+                var shade = i < shades.Count ? shades[i] : 1f;
+
+                for (var y = y0; y < y1; y++)
+                {
+                    var v = wallHeight <= 0.0001f ? 0f : (y - top) / wallHeight;
+                    SamplePresetTextureColorFast(material, u, v, shade, dist, out var r, out var g, out var b);
+
+                    var rowIndex = y * width * 4;
+                    for (var x = x0; x < x1; x++)
+                    {
+                        var idx = rowIndex + x * 4;
+                        pixels[idx + 0] = b;
+                        pixels[idx + 1] = g;
+                        pixels[idx + 2] = r;
+                        pixels[idx + 3] = 255;
+                    }
+                }
+            }
+        }
+
+        sceneBitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, width * 4, 0);
+    }
+
+    private static void FillSkyAndFloor(byte[] pixels, int width, int height)
+    {
+        var half = height / 2;
+        for (var y = 0; y < height; y++)
+        {
+            var t = y < half
+                ? (float)y / Math.Max(1, half - 1)
+                : (float)(y - half) / Math.Max(1, height - half - 1);
+
+            byte r;
+            byte g;
+            byte b;
+
+            if (y < half)
+            {
+                r = (byte)Math.Clamp(14 + t * 26, 0, 255);
+                g = (byte)Math.Clamp(20 + t * 24, 0, 255);
+                b = (byte)Math.Clamp(36 + t * 28, 0, 255);
+            }
+            else
+            {
+                r = (byte)Math.Clamp(35 - t * 12, 0, 255);
+                g = (byte)Math.Clamp(24 - t * 10, 0, 255);
+                b = (byte)Math.Clamp(21 - t * 8, 0, 255);
+            }
+
+            var rowIndex = y * width * 4;
+            for (var x = 0; x < width; x++)
+            {
+                var idx = rowIndex + x * 4;
+                pixels[idx + 0] = b;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = r;
+                pixels[idx + 3] = 255;
+            }
+        }
+    }
+
     private void DrawSkyAndFloor()
     {
         var width = GameCanvas.Width;
@@ -177,9 +338,17 @@ public partial class MainWindow : Window
         Canvas.SetTop(floor, height * 0.5);
         GameCanvas.Children.Add(floor);
 
-        for (var i = 0; i < 18; i++)
+        var floorBands = settings.Quality switch
         {
-            var y = height * 0.5 + i * (height * 0.5 / 18.0);
+            QualityMode.Low => 6,
+            QualityMode.Medium => 10,
+            QualityMode.High => 14,
+            _ => 18
+        };
+
+        for (var i = 0; i < floorBands; i++)
+        {
+            var y = height * 0.5 + i * (height * 0.5 / floorBands);
             var line = new Line
             {
                 X1 = 0,
@@ -197,6 +366,8 @@ public partial class MainWindow : Window
     {
         var rays = snapshot.WallDistances;
         var shades = snapshot.WallShades;
+        var textureU = snapshot.WallTextureU;
+        var materialIds = snapshot.WallMaterialIds;
         if (rays.Count == 0)
         {
             return;
@@ -205,63 +376,292 @@ public partial class MainWindow : Window
         var width = GameCanvas.Width;
         var height = GameCanvas.Height;
         var columnWidth = width / rays.Count;
+        var baseSamples = settings.Quality switch
+        {
+            QualityMode.Low => 3,
+            QualityMode.Medium => 8,
+            QualityMode.High => 14,
+            _ => 22
+        };
 
         for (var i = 0; i < rays.Count; i++)
         {
             var dist = Math.Max(0.01f, rays[i]);
             var wallHeight = Math.Clamp((float)(height * 118.0 / dist), 12f, (float)height);
             var top = (height - wallHeight) * 0.5;
+            var u = i < textureU.Count ? textureU[i] : 0f;
+            var material = i < materialIds.Count ? materialIds[i] : 1;
+            var verticalSamples = Math.Clamp(Math.Max(baseSamples, (int)(wallHeight / 8f)), baseSamples, 36);
+            var sampleHeight = wallHeight / verticalSamples;
 
-            var shadeValue = (int)Math.Clamp(shades[i] * 255.0, 32.0, 255.0);
-            var pattern = 0.82 + 0.18 * Math.Sin(i * 0.2 + dist * 0.015);
-            var r = (byte)Math.Clamp(shadeValue * pattern, 0, 255);
-            var g = (byte)Math.Clamp(shadeValue * 0.78 * pattern, 0, 255);
-            var b = (byte)Math.Clamp(shadeValue * 0.68 * pattern, 0, 255);
-
-            var wallColumn = new Rectangle
+            for (var sample = 0; sample < verticalSamples; sample++)
             {
-                Width = Math.Ceiling(columnWidth + 1),
-                Height = wallHeight,
-                Fill = new SolidColorBrush(Color.FromRgb(r, g, b))
-            };
+                var v = verticalSamples == 1 ? 0f : (float)sample / (verticalSamples - 1);
+                var color = SamplePresetTextureColor(material, u, v, shades[i], dist);
 
-            Canvas.SetLeft(wallColumn, i * columnWidth);
-            Canvas.SetTop(wallColumn, top);
-            GameCanvas.Children.Add(wallColumn);
-
-            if (settings.Quality >= QualityMode.High && i % 6 == 0)
-            {
-                var seam = new Line
+                var band = new Rectangle
                 {
-                    X1 = i * columnWidth,
-                    X2 = i * columnWidth,
-                    Y1 = top,
-                    Y2 = top + wallHeight,
-                    Stroke = new SolidColorBrush(Color.FromArgb(75, 20, 20, 24)),
-                    StrokeThickness = 1
+                    Width = Math.Ceiling(columnWidth + 1),
+                    Height = sampleHeight + 1,
+                    Fill = new SolidColorBrush(color)
                 };
-                GameCanvas.Children.Add(seam);
-            }
 
-            if (settings.Quality == QualityMode.Ultra && wallHeight > 40)
-            {
-                var mortarCount = Math.Max(1, (int)(wallHeight / 42));
-                for (var lineIndex = 1; lineIndex <= mortarCount; lineIndex++)
-                {
-                    var y = top + lineIndex * (wallHeight / (mortarCount + 1));
-                    var mortar = new Line
-                    {
-                        X1 = i * columnWidth,
-                        X2 = i * columnWidth + columnWidth,
-                        Y1 = y,
-                        Y2 = y,
-                        Stroke = new SolidColorBrush(Color.FromArgb(45, 30, 30, 30)),
-                        StrokeThickness = 1
-                    };
-                    GameCanvas.Children.Add(mortar);
-                }
+                Canvas.SetLeft(band, i * columnWidth);
+                Canvas.SetTop(band, top + sample * sampleHeight);
+                GameCanvas.Children.Add(band);
             }
         }
+    }
+
+    private Color SamplePresetTextureColor(int material, float u, float v, float shade, float distance)
+    {
+        u = u - MathF.Floor(u);
+        v = v - MathF.Floor(v);
+
+        var texture = wallTexturePresets.TryGetValue(material, out var pixels)
+            ? pixels
+            : wallTexturePresets[1];
+
+        var x = Math.Clamp(u * (WallTextureSize - 1), 0f, WallTextureSize - 1);
+        var y = Math.Clamp(v * (WallTextureSize - 1), 0f, WallTextureSize - 1);
+        var x0 = (int)MathF.Floor(x);
+        var y0 = (int)MathF.Floor(y);
+        var x1 = Math.Min(x0 + 1, WallTextureSize - 1);
+        var y1 = Math.Min(y0 + 1, WallTextureSize - 1);
+        var fx = x - x0;
+        var fy = y - y0;
+
+        var c00 = texture[y0 * WallTextureSize + x0];
+        var c10 = texture[y0 * WallTextureSize + x1];
+        var c01 = texture[y1 * WallTextureSize + x0];
+        var c11 = texture[y1 * WallTextureSize + x1];
+
+        var r0 = c00.R + (c10.R - c00.R) * fx;
+        var g0 = c00.G + (c10.G - c00.G) * fx;
+        var b0 = c00.B + (c10.B - c00.B) * fx;
+
+        var r1 = c01.R + (c11.R - c01.R) * fx;
+        var g1 = c01.G + (c11.G - c01.G) * fx;
+        var b1 = c01.B + (c11.B - c01.B) * fx;
+
+        var color = Color.FromRgb(
+            (byte)Math.Clamp(r0 + (r1 - r0) * fy, 0, 255),
+            (byte)Math.Clamp(g0 + (g1 - g0) * fy, 0, 255),
+            (byte)Math.Clamp(b0 + (b1 - b0) * fy, 0, 255));
+
+        var fog = Math.Clamp(1.0 - distance / 3400.0, 0.5, 1.0);
+        var finalShade = Math.Clamp(shade * fog, 0.12f, 1f);
+
+        return Color.FromRgb(
+            (byte)Math.Clamp(color.R * finalShade, 0, 255),
+            (byte)Math.Clamp(color.G * finalShade, 0, 255),
+            (byte)Math.Clamp(color.B * finalShade, 0, 255));
+    }
+
+    private void SamplePresetTextureColorFast(int material, float u, float v, float shade, float distance, out byte r, out byte g, out byte b)
+    {
+        u = u - MathF.Floor(u);
+        v = v - MathF.Floor(v);
+
+        var texture = wallTexturePresets.TryGetValue(material, out var pixels)
+            ? pixels
+            : wallTexturePresets[1];
+
+        var x = Math.Clamp(u * (WallTextureSize - 1), 0f, WallTextureSize - 1);
+        var y = Math.Clamp(v * (WallTextureSize - 1), 0f, WallTextureSize - 1);
+        var x0 = (int)MathF.Floor(x);
+        var y0 = (int)MathF.Floor(y);
+        var x1 = Math.Min(x0 + 1, WallTextureSize - 1);
+        var y1 = Math.Min(y0 + 1, WallTextureSize - 1);
+        var fx = x - x0;
+        var fy = y - y0;
+
+        var c00 = texture[y0 * WallTextureSize + x0];
+        var c10 = texture[y0 * WallTextureSize + x1];
+        var c01 = texture[y1 * WallTextureSize + x0];
+        var c11 = texture[y1 * WallTextureSize + x1];
+
+        var rr0 = c00.R + (c10.R - c00.R) * fx;
+        var gg0 = c00.G + (c10.G - c00.G) * fx;
+        var bb0 = c00.B + (c10.B - c00.B) * fx;
+
+        var rr1 = c01.R + (c11.R - c01.R) * fx;
+        var gg1 = c01.G + (c11.G - c01.G) * fx;
+        var bb1 = c01.B + (c11.B - c01.B) * fx;
+
+        var fog = Math.Clamp(1.0 - distance / 3400.0, 0.5, 1.0);
+        var finalShade = Math.Clamp(shade * fog, 0.12f, 1f);
+
+        r = (byte)Math.Clamp((rr0 + (rr1 - rr0) * fy) * finalShade, 0, 255);
+        g = (byte)Math.Clamp((gg0 + (gg1 - gg0) * fy) * finalShade, 0, 255);
+        b = (byte)Math.Clamp((bb0 + (bb1 - bb0) * fy) * finalShade, 0, 255);
+    }
+
+    private void InitializeWallTexturePresets()
+    {
+        wallTexturePresets[1] = BuildBrickTexture();
+        wallTexturePresets[2] = BuildConcreteTexture();
+        wallTexturePresets[3] = BuildMetalTexture();
+    }
+
+    private void LoadExternalWallTextures()
+    {
+        TryLoadExternalTexture(1, "wall_brick");
+        TryLoadExternalTexture(2, "wall_concrete");
+        TryLoadExternalTexture(3, "wall_metal");
+    }
+
+    private void TryLoadExternalTexture(int materialId, string baseName)
+    {
+        foreach (var dir in textureSearchDirs)
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            var candidates = new[]
+            {
+                IOPath.Combine(dir, $"{baseName}.png"),
+                IOPath.Combine(dir, $"{baseName}.jpg"),
+                IOPath.Combine(dir, $"{baseName}.jpeg")
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                var loaded = TryLoadTexturePixels(candidate);
+                if (loaded is not null)
+                {
+                    wallTexturePresets[materialId] = loaded;
+                }
+
+                return;
+            }
+        }
+    }
+
+    private static Color[]? TryLoadTexturePixels(string filePath)
+    {
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
+            bitmap.EndInit();
+            bitmap.Freeze();
+
+            var source = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
+            source.Freeze();
+
+            var srcWidth = Math.Max(1, source.PixelWidth);
+            var srcHeight = Math.Max(1, source.PixelHeight);
+            var srcStride = srcWidth * 4;
+            var srcBuffer = new byte[srcHeight * srcStride];
+            source.CopyPixels(srcBuffer, srcStride, 0);
+
+            var pixels = new Color[WallTextureSize * WallTextureSize];
+            for (var y = 0; y < WallTextureSize; y++)
+            {
+                var srcY = Math.Clamp((int)((y + 0.5f) * srcHeight / WallTextureSize), 0, srcHeight - 1);
+                for (var x = 0; x < WallTextureSize; x++)
+                {
+                    var srcX = Math.Clamp((int)((x + 0.5f) * srcWidth / WallTextureSize), 0, srcWidth - 1);
+                    var idx = srcY * srcStride + srcX * 4;
+                    var b = srcBuffer[idx + 0];
+                    var g = srcBuffer[idx + 1];
+                    var r = srcBuffer[idx + 2];
+                    pixels[y * WallTextureSize + x] = Color.FromRgb(r, g, b);
+                }
+            }
+
+            return pixels;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Color[] BuildBrickTexture()
+    {
+        var pixels = new Color[WallTextureSize * WallTextureSize];
+        const int brickW = 16;
+        const int brickH = 10;
+        const int mortar = 1;
+
+        for (var y = 0; y < WallTextureSize; y++)
+        {
+            var row = y / brickH;
+            var offset = (row % 2) * (brickW / 2);
+
+            for (var x = 0; x < WallTextureSize; x++)
+            {
+                var bx = (x + offset) % brickW;
+                var by = y % brickH;
+
+                if (bx < mortar || by < mortar)
+                {
+                    pixels[y * WallTextureSize + x] = Color.FromRgb(70, 65, 62);
+                    continue;
+                }
+
+                var n = Hash((x + 1) * 0.23f, (y + 1) * 0.19f, 11);
+                var r = (byte)Math.Clamp(132 + n * 52, 0, 255);
+                var g = (byte)Math.Clamp(58 + n * 26, 0, 255);
+                var b = (byte)Math.Clamp(44 + n * 18, 0, 255);
+                pixels[y * WallTextureSize + x] = Color.FromRgb(r, g, b);
+            }
+        }
+
+        return pixels;
+    }
+
+    private static Color[] BuildConcreteTexture()
+    {
+        var pixels = new Color[WallTextureSize * WallTextureSize];
+        for (var y = 0; y < WallTextureSize; y++)
+        {
+            for (var x = 0; x < WallTextureSize; x++)
+            {
+                var n1 = Hash((x + 3) * 0.15f, (y + 7) * 0.15f, 31);
+                var n2 = Hash((x + 5) * 0.5f, (y + 9) * 0.5f, 47);
+                var tone = (byte)Math.Clamp(104 + n1 * 34 + n2 * 22, 0, 255);
+                pixels[y * WallTextureSize + x] = Color.FromRgb(tone, tone, (byte)Math.Clamp(tone + 8, 0, 255));
+            }
+        }
+
+        return pixels;
+    }
+
+    private static Color[] BuildMetalTexture()
+    {
+        var pixels = new Color[WallTextureSize * WallTextureSize];
+        for (var y = 0; y < WallTextureSize; y++)
+        {
+            for (var x = 0; x < WallTextureSize; x++)
+            {
+                var brushed = 0.68f + 0.32f * MathF.Sin(y * 0.8f);
+                var n = Hash((x + 13) * 0.35f, (y + 4) * 0.35f, 73);
+                var seam = (x % 12 == 0 || y % 12 == 0) ? 0.58f : 1f;
+                var baseTone = Math.Clamp((98 + 64 * brushed + 20 * n) * seam, 0, 255);
+                var tone = (byte)baseTone;
+                pixels[y * WallTextureSize + x] = Color.FromRgb((byte)Math.Clamp(tone * 0.82f, 0, 255), tone, (byte)Math.Clamp(tone * 1.06f, 0, 255));
+            }
+        }
+
+        return pixels;
+    }
+
+    private static float Hash(float x, float y, int seed)
+    {
+        var value = MathF.Sin(x * 12.9898f + y * 78.233f + seed * 37.719f) * 43758.5453f;
+        return value - MathF.Floor(value);
     }
 
     private void DrawSprites(GameSnapshot snapshot)
@@ -565,6 +965,7 @@ public partial class MainWindow : Window
             "Autosave occurs on checkpoints and level transitions.\n\n" +
             $"Current profile: {settings.PlayerName}\n" +
             $"Resolution: {settings.ScreenWidth}x{settings.ScreenHeight}\n" +
+            $"POV: {settings.PovDegrees:0}°\n" +
             $"Difficulty: {settings.Difficulty}\n" +
             $"Save: {saveInfo}";
 
@@ -656,7 +1057,7 @@ public partial class MainWindow : Window
         GameCanvas.Width = width;
         GameCanvas.Height = height;
 
-        if (!isFullscreenApplied)
+        if (!isFullscreenApplied && WindowState == WindowState.Normal)
         {
             Width = Math.Max(980, width + 80);
             Height = Math.Max(700, height + 140);
@@ -665,21 +1066,39 @@ public partial class MainWindow : Window
 
     private void ApplyWindowMode(bool fullscreen)
     {
+        if (fullscreen == isFullscreenApplied)
+        {
+            return;
+        }
+
         isFullscreenApplied = fullscreen;
         if (fullscreen)
         {
+            if (WindowState == WindowState.Maximized)
+            {
+                WindowState = WindowState.Normal;
+            }
+
+            restoreWindowBounds = new Rect(Left, Top, Width, Height);
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
             WindowState = WindowState.Maximized;
         }
         else
         {
-            if (WindowStyle == WindowStyle.None)
+            WindowState = WindowState.Normal;
+            WindowStyle = WindowStyle.SingleBorderWindow;
+            ResizeMode = ResizeMode.CanResize;
+
+            if (restoreWindowBounds.Width > 0 && restoreWindowBounds.Height > 0)
             {
-                WindowStyle = WindowStyle.SingleBorderWindow;
-                ResizeMode = ResizeMode.CanResize;
-                WindowState = WindowState.Normal;
+                Left = restoreWindowBounds.Left;
+                Top = restoreWindowBounds.Top;
+                Width = restoreWindowBounds.Width;
+                Height = restoreWindowBounds.Height;
             }
+
+            ApplyResolution(settings.ScreenWidth, settings.ScreenHeight);
         }
     }
 
@@ -785,14 +1204,23 @@ public partial class MainWindow : Window
             quality = QualityMode.High;
         }
 
+        var pov = float.TryParse(PovComboBox.SelectedItem?.ToString(), out var parsedPov)
+            ? parsedPov
+            : 74f;
+        pov = Math.Clamp(pov, 60f, 110f);
+
         var fullscreen = FullscreenCheckBox.IsChecked == true;
 
         var playerName = string.IsNullOrWhiteSpace(PlayerNameTextBox.Text)
             ? "Player"
             : PlayerNameTextBox.Text.Trim();
 
-        settings = new GameSettings(width, height, selectedDifficulty, playerName, quality, fullscreen);
+        settings = new GameSettings(width, height, selectedDifficulty, playerName, quality, fullscreen, pov);
         persistence.SaveSettings(settings);
+
+        timer.Interval = settings.Quality == QualityMode.Low
+            ? TimeSpan.FromMilliseconds(22)
+            : TimeSpan.FromMilliseconds(16);
 
         ApplyResolution(width, height);
         ApplyWindowMode(fullscreen);

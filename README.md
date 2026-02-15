@@ -77,6 +77,12 @@ What this does every run:
 5. Writes release metadata:
 	- `release/latest.json`
 
+Run this file for normal play:
+
+- `release/HellCaster-latest.exe` (the intended final launcher)
+
+`release/latest/` is the raw publish output used to produce the latest launcher and includes extra binaries/debug symbols.
+
 You always get only the latest release in the special release directory; stale outputs are removed automatically.
 
 ### Optional release variants

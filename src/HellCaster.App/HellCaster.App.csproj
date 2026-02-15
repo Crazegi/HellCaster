@@ -4,6 +4,13 @@
     <ProjectReference Include="..\HellCaster.Runtime\HellCaster.Runtime.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Textures\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

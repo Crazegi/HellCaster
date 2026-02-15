@@ -22,9 +22,10 @@ public sealed record GameSettings(
     DifficultyMode Difficulty,
     string PlayerName,
     QualityMode Quality,
-    bool Fullscreen)
+    bool Fullscreen,
+    float PovDegrees)
 {
-    public static GameSettings Default => new(1280, 720, DifficultyMode.Medium, "Player", QualityMode.High, false);
+    public static GameSettings Default => new(1280, 720, DifficultyMode.Medium, "Player", QualityMode.High, false, 74f);
 }
 
 public sealed record ChallengeState(
@@ -102,6 +103,8 @@ public sealed record GameSnapshot(
     IReadOnlyList<BulletView> Bullets,
     IReadOnlyList<float> WallDistances,
     IReadOnlyList<float> WallShades,
+    IReadOnlyList<float> WallTextureU,
+    IReadOnlyList<int> WallMaterialIds,
     IReadOnlyList<SpriteRenderView> VisibleSprites,
     float PlayerAngle,
     float Fov,

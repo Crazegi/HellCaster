@@ -42,6 +42,7 @@ public sealed class PersistenceService
         var playerName = string.IsNullOrWhiteSpace(loaded.PlayerName) ? "Player" : loaded.PlayerName;
         var quality = Enum.IsDefined(typeof(QualityMode), loaded.Quality) ? loaded.Quality : QualityMode.High;
         var difficulty = Enum.IsDefined(typeof(DifficultyMode), loaded.Difficulty) ? loaded.Difficulty : DifficultyMode.Medium;
+        var povDegrees = loaded.PovDegrees < 45f || loaded.PovDegrees > 120f ? GameSettings.Default.PovDegrees : loaded.PovDegrees;
 
         return loaded with
         {
@@ -49,7 +50,8 @@ public sealed class PersistenceService
             ScreenHeight = height,
             PlayerName = playerName,
             Quality = quality,
-            Difficulty = difficulty
+            Difficulty = difficulty,
+            PovDegrees = povDegrees
         };
     }
 

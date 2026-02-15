@@ -135,6 +135,9 @@ Press ESC" />
                                 <TextBlock Text="Quality" Foreground="#DCE8FF" />
                                 <ComboBox Name="QualityComboBox" Margin="0,4,0,10" />
 
+                                <TextBlock Text="POV (Field of View)" Foreground="#DCE8FF" />
+                                <ComboBox Name="PovComboBox" Margin="0,4,0,10" />
+
                                 <CheckBox Name="FullscreenCheckBox"
                                           Content="Fullscreen"
                                           Foreground="#DCE8FF"

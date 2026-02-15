@@ -29,6 +29,7 @@ public static class LevelGenerator
 
         var checkpoints = CreateCheckpoints(path);
         var killTarget = BaseKillTarget(difficulty) + levelIndex * 2;
+        ApplyWallMaterials(tiles, width, height, random, levelIndex);
 
         return new GeneratedLevel(
             width,
@@ -39,6 +40,49 @@ public static class LevelGenerator
             checkpoints,
             killTarget,
             levelSeed);
+    }
+
+    private static void ApplyWallMaterials(int[] tiles, int width, int height, Random random, int levelIndex)
+    {
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var index = y * width + x;
+                if (tiles[index] == 0)
+                {
+                    continue;
+                }
+
+                if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
+                {
+                    tiles[index] = 1;
+                    continue;
+                }
+
+                var openNeighbors = 0;
+                if (tiles[y * width + (x - 1)] == 0) openNeighbors++;
+                if (tiles[y * width + (x + 1)] == 0) openNeighbors++;
+                if (tiles[(y - 1) * width + x] == 0) openNeighbors++;
+                if (tiles[(y + 1) * width + x] == 0) openNeighbors++;
+
+                var material = 1;
+                if (openNeighbors >= 3)
+                {
+                    material = 3;
+                }
+                else if (openNeighbors == 2 && ((x + y + levelIndex) % 3 == 0 || random.NextDouble() < 0.18))
+                {
+                    material = 2;
+                }
+                else if (random.NextDouble() < 0.06)
+                {
+                    material = 3;
+                }
+
+                tiles[index] = material;
+            }
+        }
     }
 
     private static void CarveMaze(int[] tiles, int width, int height, Random random)
