@@ -8,6 +8,8 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using HellCaster.Runtime;
 using IOPath = System.IO.Path;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace HellCaster.App;
 
@@ -15,12 +17,14 @@ public partial class MainWindow : Window
 {
     private const float WallWorldSize = 64f;
     private const int WallTextureSize = 128;
+    private const float MouseTurnSensitivity = 0.12f;
 
     private readonly GameEngine game = new();
     private readonly DispatcherTimer timer;
     private readonly HashSet<Key> pressed = [];
     private readonly PersistenceService persistence;
     private readonly Dictionary<int, Color[]> wallTexturePresets = [];
+    private readonly Stopwatch frameClock = Stopwatch.StartNew();
     private readonly string[] textureSearchDirs =
     [
         IOPath.Combine(AppContext.BaseDirectory, "Textures"),
@@ -30,11 +34,11 @@ public partial class MainWindow : Window
 
     private readonly List<LeaderboardEntry> leaderboard;
     private GameSettings settings;
-    private DateTime lastFrameTime;
+    private long lastFrameTimestamp;
     private bool inGame;
     private float mouseTurnAccumulator;
     private bool hasMouseSample;
-    private double previousMouseX;
+    private bool suppressNextMouseSample;
     private bool isFullscreenApplied;
     private Rect restoreWindowBounds;
     private WriteableBitmap? sceneBitmap;
@@ -70,7 +74,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             Focus();
-            lastFrameTime = DateTime.UtcNow;
+            lastFrameTimestamp = frameClock.ElapsedTicks;
             timer.Start();
             RefreshMenuInfo();
         };
@@ -106,17 +110,16 @@ public partial class MainWindow : Window
 
     private void Tick(object? sender, EventArgs e)
     {
-        var now = DateTime.UtcNow;
-        var dt = (float)(now - lastFrameTime).TotalSeconds;
-        lastFrameTime = now;
+        var nowTicks = frameClock.ElapsedTicks;
+        var dt = (float)(nowTicks - lastFrameTimestamp) / Stopwatch.Frequency;
+        lastFrameTimestamp = nowTicks;
 
         if (!inGame || MenuRoot.Visibility == Visibility.Visible)
         {
             return;
         }
 
-        var snapshot = game.GetSnapshot();
-        if (snapshot.IsGameOver && pressed.Contains(Key.R))
+        if (game.IsGameOver && pressed.Contains(Key.R))
         {
             StartNewCampaignWithCurrentSettings();
             return;
@@ -228,7 +231,7 @@ public partial class MainWindow : Window
         }
 
         var pixels = scenePixels;
-        FillSkyAndFloor(pixels, width, height);
+        FillSkyAndFloorPerspective(snapshot, pixels, width, height);
 
         var rays = snapshot.WallDistances;
         var shades = snapshot.WallShades;
@@ -237,19 +240,24 @@ public partial class MainWindow : Window
 
         if (rays.Count > 0)
         {
-            var columnWidth = (double)width / rays.Count;
+            var rayCount = rays.Count;
             var fov = Math.Clamp(snapshot.Fov, 0.35f, 2.4f);
             var projectionPlane = (float)(width * 0.5 / Math.Tan(fov * 0.5));
 
-            for (var i = 0; i < rays.Count; i++)
+            for (var i = 0; i < rayCount; i++)
             {
                 var dist = Math.Max(0.01f, rays[i]);
-                var wallHeight = Math.Clamp((WallWorldSize / dist) * projectionPlane, 8f, (float)height * 1.4f);
-                var top = (height - wallHeight) * 0.5f;
-                var bottom = top + wallHeight;
+                var projectedWallHeight = Math.Max(8f, (WallWorldSize / dist) * projectionPlane);
+                var top = (height - projectedWallHeight) * 0.5f;
+                var bottom = top + projectedWallHeight;
 
-                var x0 = Math.Clamp((int)Math.Floor(i * columnWidth), 0, width - 1);
-                var x1 = Math.Clamp((int)Math.Ceiling((i + 1) * columnWidth), x0 + 1, width);
+                var x0 = i * width / rayCount;
+                var x1 = (i + 1) * width / rayCount;
+                if (x1 <= x0)
+                {
+                    x1 = Math.Min(width, x0 + 1);
+                }
+
                 var y0 = Math.Clamp((int)Math.Floor(top), 0, height - 1);
                 var y1 = Math.Clamp((int)Math.Ceiling(bottom), y0 + 1, height);
 
@@ -259,8 +267,9 @@ public partial class MainWindow : Window
 
                 for (var y = y0; y < y1; y++)
                 {
-                    var v = wallHeight <= 0.0001f ? 0f : (y - top) / wallHeight;
-                    SamplePresetTextureColorFast(material, u, v, shade, dist, out var r, out var g, out var b);
+                    var v = projectedWallHeight <= 0.0001f ? 0f : (y - top) / projectedWallHeight;
+                    var closeRangeLod = Math.Clamp((projectedWallHeight - (float)height * 0.72f) / ((float)height * 0.85f), 0f, 0.46f);
+                    SamplePresetTextureColorFast(material, u, v, shade, dist, closeRangeLod, out var r, out var g, out var b);
 
                     var rowIndex = y * width * 4;
                     for (var x = x0; x < x1; x++)
@@ -278,42 +287,95 @@ public partial class MainWindow : Window
         sceneBitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, width * 4, 0);
     }
 
-    private static void FillSkyAndFloor(byte[] pixels, int width, int height)
+    private static void FillSkyAndFloorPerspective(GameSnapshot snapshot, byte[] pixels, int width, int height)
     {
-        var half = height / 2;
+        var half = height / 2f;
+        var projectionPlane = (float)(width * 0.5 / Math.Tan(Math.Clamp(snapshot.Fov, 0.35f, 2.4f) * 0.5));
+        var eyeHeight = WallWorldSize * 0.5f;
+
+        var leftRayAngle = snapshot.PlayerAngle - snapshot.Fov * 0.5f;
+        var rightRayAngle = snapshot.PlayerAngle + snapshot.Fov * 0.5f;
+        var rayDirX0 = MathF.Cos(leftRayAngle);
+        var rayDirY0 = MathF.Sin(leftRayAngle);
+        var rayDirX1 = MathF.Cos(rightRayAngle);
+        var rayDirY1 = MathF.Sin(rightRayAngle);
+
+        var shadeBands = 18f;
+
         for (var y = 0; y < height; y++)
         {
-            var t = y < half
-                ? (float)y / Math.Max(1, half - 1)
-                : (float)(y - half) / Math.Max(1, height - half - 1);
+            var isFloor = y >= half;
+            var p = isFloor ? (y - half + 0.5f) : (half - y + 0.5f);
+            var rowDistance = (eyeHeight * projectionPlane) / Math.Max(0.5f, p);
 
-            byte r;
-            byte g;
-            byte b;
+            var rowStartX = snapshot.Player.X + rowDistance * rayDirX0;
+            var rowStartY = snapshot.Player.Y + rowDistance * rayDirY0;
+            var floorStepX = rowDistance * (rayDirX1 - rayDirX0) / Math.Max(1, width);
+            var floorStepY = rowDistance * (rayDirY1 - rayDirY0) / Math.Max(1, width);
 
-            if (y < half)
+            var fog = Math.Clamp(1f - rowDistance / 3000f, 0.2f, 1f);
+            var bandedShade = MathF.Floor(fog * shadeBands) / shadeBands;
+            if (!isFloor)
             {
-                r = (byte)Math.Clamp(14 + t * 26, 0, 255);
-                g = (byte)Math.Clamp(20 + t * 24, 0, 255);
-                b = (byte)Math.Clamp(36 + t * 28, 0, 255);
+                bandedShade *= 0.88f;
             }
-            else
-            {
-                r = (byte)Math.Clamp(35 - t * 12, 0, 255);
-                g = (byte)Math.Clamp(24 - t * 10, 0, 255);
-                b = (byte)Math.Clamp(21 - t * 8, 0, 255);
-            }
+
+            var worldX = rowStartX;
+            var worldY = rowStartY;
 
             var rowIndex = y * width * 4;
             for (var x = 0; x < width; x++)
             {
+                SamplePlanarColor(worldX, worldY, isFloor, bandedShade, out var r, out var g, out var b);
+
                 var idx = rowIndex + x * 4;
                 pixels[idx + 0] = b;
                 pixels[idx + 1] = g;
                 pixels[idx + 2] = r;
                 pixels[idx + 3] = 255;
+
+                worldX += floorStepX;
+                worldY += floorStepY;
             }
         }
+    }
+
+    private static void SamplePlanarColor(float worldX, float worldY, bool isFloor, float shade, out byte r, out byte g, out byte b)
+    {
+        var tileX = (int)MathF.Floor(worldX / WallWorldSize);
+        var tileY = (int)MathF.Floor(worldY / WallWorldSize);
+
+        var checker = ((tileX ^ tileY) & 1) == 0;
+        var grain = ((tileX * 73856093) ^ (tileY * 19349663)) & 31;
+        var variation = grain / 31f;
+
+        float baseR;
+        float baseG;
+        float baseB;
+
+        if (isFloor)
+        {
+            baseR = checker ? 46f : 34f;
+            baseG = checker ? 38f : 28f;
+            baseB = checker ? 33f : 24f;
+            baseR += variation * 8f;
+            baseG += variation * 7f;
+            baseB += variation * 6f;
+        }
+        else
+        {
+            baseR = checker ? 23f : 17f;
+            baseG = checker ? 32f : 24f;
+            baseB = checker ? 52f : 40f;
+            baseR += variation * 6f;
+            baseG += variation * 7f;
+            baseB += variation * 9f;
+        }
+
+        var finalShade = Math.Clamp(shade, 0.16f, 1f);
+        r = (byte)Math.Clamp(baseR * finalShade, 0f, 255f);
+        g = (byte)Math.Clamp(baseG * finalShade, 0f, 255f);
+        b = (byte)Math.Clamp(baseB * finalShade, 0f, 255f);
     }
 
     private void DrawSkyAndFloor()
@@ -458,10 +520,10 @@ public partial class MainWindow : Window
             (byte)Math.Clamp(color.B * finalShade, 0, 255));
     }
 
-    private void SamplePresetTextureColorFast(int material, float u, float v, float shade, float distance, out byte r, out byte g, out byte b)
+    private void SamplePresetTextureColorFast(int material, float u, float v, float shade, float distance, float closeRangeLod, out byte r, out byte g, out byte b)
     {
         u = u - MathF.Floor(u);
-        v = v - MathF.Floor(v);
+        v = Math.Clamp(v, 0f, 1f);
 
         var texture = wallTexturePresets.TryGetValue(material, out var pixels)
             ? pixels
@@ -489,12 +551,40 @@ public partial class MainWindow : Window
         var gg1 = c01.G + (c11.G - c01.G) * fx;
         var bb1 = c01.B + (c11.B - c01.B) * fx;
 
+        var baseR = rr0 + (rr1 - rr0) * fy;
+        var baseG = gg0 + (gg1 - gg0) * fy;
+        var baseB = bb0 + (bb1 - bb0) * fy;
+
+        if (closeRangeLod > 0.001f)
+        {
+            var centerX = (int)MathF.Round(x);
+            var centerY = (int)MathF.Round(y);
+            var xm = Math.Max(0, centerX - 1);
+            var xp = Math.Min(WallTextureSize - 1, centerX + 1);
+            var ym = Math.Max(0, centerY - 1);
+            var yp = Math.Min(WallTextureSize - 1, centerY + 1);
+
+            var cL = texture[centerY * WallTextureSize + xm];
+            var cR = texture[centerY * WallTextureSize + xp];
+            var cT = texture[ym * WallTextureSize + centerX];
+            var cB = texture[yp * WallTextureSize + centerX];
+
+            var blurR = (cL.R + cR.R + cT.R + cB.R) * 0.25f;
+            var blurG = (cL.G + cR.G + cT.G + cB.G) * 0.25f;
+            var blurB = (cL.B + cR.B + cT.B + cB.B) * 0.25f;
+
+            var lod = Math.Clamp(closeRangeLod, 0f, 0.5f);
+            baseR = baseR + (blurR - baseR) * lod;
+            baseG = baseG + (blurG - baseG) * lod;
+            baseB = baseB + (blurB - baseB) * lod;
+        }
+
         var fog = Math.Clamp(1.0 - distance / 3400.0, 0.5, 1.0);
         var finalShade = Math.Clamp(shade * fog, 0.12f, 1f);
 
-        r = (byte)Math.Clamp((rr0 + (rr1 - rr0) * fy) * finalShade, 0, 255);
-        g = (byte)Math.Clamp((gg0 + (gg1 - gg0) * fy) * finalShade, 0, 255);
-        b = (byte)Math.Clamp((bb0 + (bb1 - bb0) * fy) * finalShade, 0, 255);
+        r = (byte)Math.Clamp(baseR * finalShade, 0, 255);
+        g = (byte)Math.Clamp(baseG * finalShade, 0, 255);
+        b = (byte)Math.Clamp(baseB * finalShade, 0, 255);
     }
 
     private void InitializeWallTexturePresets()
@@ -673,13 +763,39 @@ public partial class MainWindow : Window
 
         var width = GameCanvas.Width;
         var height = GameCanvas.Height;
-        var columnWidth = width / snapshot.WallDistances.Count;
+        var wallDepths = snapshot.WallDistances;
+        var rayCount = Math.Max(1, wallDepths.Count);
+        var columnWidth = width / rayCount;
 
         foreach (var sprite in snapshot.VisibleSprites)
         {
             var spriteWidth = sprite.Size * 0.75;
             var left = sprite.ScreenX * columnWidth - spriteWidth * 0.5;
+            var right = left + spriteWidth;
             var top = height * 0.5 - sprite.Size * 0.5;
+
+            var xStart = Math.Clamp((int)Math.Floor(left), 0, Math.Max(0, (int)width - 1));
+            var xEnd = Math.Clamp((int)Math.Ceiling(right), xStart + 1, Math.Max(xStart + 1, (int)width));
+
+            var visibleLeft = -1;
+            var visibleRight = -1;
+
+            for (var x = xStart; x < xEnd; x++)
+            {
+                var rayIndex = Math.Clamp((int)(x / Math.Max(1e-6, columnWidth)), 0, rayCount - 1);
+                if (sprite.Depth <= wallDepths[rayIndex] - 1.5f)
+                {
+                    visibleLeft = visibleLeft < 0 ? x : visibleLeft;
+                    visibleRight = x;
+                }
+            }
+
+            if (visibleLeft < 0 || visibleRight < visibleLeft)
+            {
+                continue;
+            }
+
+            var clippedWidth = Math.Max(1, visibleRight - visibleLeft + 1);
 
             var fill = sprite.Kind switch
             {
@@ -693,18 +809,18 @@ public partial class MainWindow : Window
 
             var body = new Rectangle
             {
-                Width = spriteWidth,
+                Width = clippedWidth,
                 Height = sprite.Size,
                 Fill = fill,
                 Stroke = Brushes.Black,
                 StrokeThickness = 2
             };
 
-            Canvas.SetLeft(body, left);
+            Canvas.SetLeft(body, visibleLeft);
             Canvas.SetTop(body, top);
             GameCanvas.Children.Add(body);
 
-            if (sprite.Kind.StartsWith("enemy", StringComparison.OrdinalIgnoreCase))
+            if (sprite.Kind.StartsWith("enemy", StringComparison.OrdinalIgnoreCase) && clippedWidth > 6)
             {
                 var eyeSize = Math.Max(4, sprite.Size * 0.1);
                 var eyeY = top + sprite.Size * 0.27;
@@ -715,7 +831,7 @@ public partial class MainWindow : Window
                     Height = eyeSize,
                     Fill = Brushes.Yellow
                 };
-                Canvas.SetLeft(eyeLeft, left + spriteWidth * 0.28);
+                Canvas.SetLeft(eyeLeft, visibleLeft + clippedWidth * 0.28);
                 Canvas.SetTop(eyeLeft, eyeY);
                 GameCanvas.Children.Add(eyeLeft);
 
@@ -725,7 +841,7 @@ public partial class MainWindow : Window
                     Height = eyeSize,
                     Fill = Brushes.Yellow
                 };
-                Canvas.SetLeft(eyeRight, left + spriteWidth * 0.62 - eyeSize);
+                Canvas.SetLeft(eyeRight, visibleLeft + clippedWidth * 0.62 - eyeSize);
                 Canvas.SetTop(eyeRight, eyeY);
                 GameCanvas.Children.Add(eyeRight);
             }
@@ -1107,8 +1223,11 @@ public partial class MainWindow : Window
         MenuRoot.Visibility = Visibility.Collapsed;
         PlayRoot.Visibility = Visibility.Visible;
         Mouse.OverrideCursor = Cursors.None;
+        Mouse.Capture(this, CaptureMode.Element);
         hasMouseSample = false;
+        suppressNextMouseSample = true;
         Focus();
+        CenterCursorInWindow();
     }
 
     private void EnterMenuMode()
@@ -1116,7 +1235,13 @@ public partial class MainWindow : Window
         MenuRoot.Visibility = Visibility.Visible;
         PlayRoot.Visibility = inGame ? Visibility.Visible : Visibility.Collapsed;
         Mouse.OverrideCursor = Cursors.Arrow;
+        if (Mouse.Captured == this)
+        {
+            Mouse.Capture(null);
+        }
+
         hasMouseSample = false;
+        suppressNextMouseSample = true;
     }
 
     private void NewGameButton_Click(object sender, RoutedEventArgs e)
@@ -1250,6 +1375,12 @@ public partial class MainWindow : Window
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
     {
         Focus();
+        if (inGame && MenuRoot.Visibility != Visibility.Visible)
+        {
+            Mouse.Capture(this, CaptureMode.Element);
+            suppressNextMouseSample = true;
+            CenterCursorInWindow();
+        }
     }
 
     private void Window_MouseMove(object sender, MouseEventArgs e)
@@ -1257,20 +1388,53 @@ public partial class MainWindow : Window
         if (!inGame || MenuRoot.Visibility == Visibility.Visible)
         {
             hasMouseSample = false;
+            suppressNextMouseSample = true;
+            return;
+        }
+
+        if (Mouse.Captured != this)
+        {
+            Mouse.Capture(this, CaptureMode.Element);
+            suppressNextMouseSample = true;
+            CenterCursorInWindow();
             return;
         }
 
         var position = e.GetPosition(this);
-        if (!hasMouseSample)
+        var centerX = Math.Max(1.0, ActualWidth) * 0.5;
+
+        if (suppressNextMouseSample)
         {
-            previousMouseX = position.X;
+            suppressNextMouseSample = false;
             hasMouseSample = true;
             return;
         }
 
-        var deltaX = position.X - previousMouseX;
-        previousMouseX = position.X;
-        mouseTurnAccumulator += (float)deltaX * 0.09f;
-        mouseTurnAccumulator = Math.Clamp(mouseTurnAccumulator, -3f, 3f);
+        if (!hasMouseSample)
+        {
+            hasMouseSample = true;
+            return;
+        }
+
+        var deltaX = position.X - centerX;
+        mouseTurnAccumulator += (float)deltaX * MouseTurnSensitivity;
+        mouseTurnAccumulator = Math.Clamp(mouseTurnAccumulator, -5f, 5f);
+
+        CenterCursorInWindow();
+        suppressNextMouseSample = true;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    private void CenterCursorInWindow()
+    {
+        if (!IsVisible || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        var center = PointToScreen(new Point(ActualWidth * 0.5, ActualHeight * 0.5));
+        SetCursorPos((int)Math.Round(center.X), (int)Math.Round(center.Y));
     }
 }

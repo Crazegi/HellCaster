@@ -66,7 +66,7 @@ public sealed record SaveGameData(
     ChallengeState Challenges,
     string PlayerName);
 
-public sealed record InputState(
+public readonly record struct InputState(
     bool MoveForward,
     bool MoveBackward,
     bool StrafeLeft,
@@ -77,7 +77,7 @@ public sealed record InputState(
     bool Fire,
     bool Interact);
 
-public sealed record Vec2(float X, float Y);
+public readonly record struct Vec2(float X, float Y);
 
 public sealed record GeneratedLevel(
     int Width,
@@ -89,11 +89,11 @@ public sealed record GeneratedLevel(
     int KillTarget,
     int LevelSeed);
 
-public sealed record EntityView(float X, float Y, float Radius, float Health);
+public readonly record struct EntityView(float X, float Y, float Radius, float Health);
 
-public sealed record BulletView(float X, float Y, float Radius, float VelocityX, float VelocityY, float Life);
+public readonly record struct BulletView(float X, float Y, float Radius, float VelocityX, float VelocityY, float Life);
 
-public sealed record SpriteRenderView(float ScreenX, float Size, float Depth, float Health, string Kind);
+public readonly record struct SpriteRenderView(float ScreenX, float Size, float Depth, float Health, string Kind);
 
 public sealed record GameSnapshot(
     float WorldWidth,

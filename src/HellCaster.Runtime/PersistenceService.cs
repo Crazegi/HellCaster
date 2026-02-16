@@ -31,7 +31,16 @@ public sealed class PersistenceService
             return GameSettings.Default;
         }
 
-        var loaded = JsonSerializer.Deserialize<GameSettings>(File.ReadAllText(path), JsonOptions);
+        GameSettings? loaded;
+        try
+        {
+            loaded = JsonSerializer.Deserialize<GameSettings>(File.ReadAllText(path), JsonOptions);
+        }
+        catch
+        {
+            return GameSettings.Default;
+        }
+
         if (loaded is null)
         {
             return GameSettings.Default;
@@ -58,7 +67,7 @@ public sealed class PersistenceService
     public void SaveSettings(GameSettings settings)
     {
         var path = Path.Combine(rootDir, "settings.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(settings, JsonOptions));
+        WriteJsonAtomic(path, settings);
     }
 
     public SaveGameData? LoadSave()
@@ -69,13 +78,20 @@ public sealed class PersistenceService
             return null;
         }
 
-        return JsonSerializer.Deserialize<SaveGameData>(File.ReadAllText(path), JsonOptions);
+        try
+        {
+            return JsonSerializer.Deserialize<SaveGameData>(File.ReadAllText(path), JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public void SaveGame(SaveGameData save)
     {
         var path = Path.Combine(rootDir, "savegame.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(save, JsonOptions));
+        WriteJsonAtomic(path, save);
     }
 
     public List<LeaderboardEntry> LoadLeaderboard()
@@ -86,12 +102,26 @@ public sealed class PersistenceService
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<LeaderboardEntry>>(File.ReadAllText(path), JsonOptions) ?? [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<LeaderboardEntry>>(File.ReadAllText(path), JsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     public void SaveLeaderboard(List<LeaderboardEntry> entries)
     {
         var path = Path.Combine(rootDir, "leaderboard.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(entries, JsonOptions));
+        WriteJsonAtomic(path, entries);
+    }
+
+    private static void WriteJsonAtomic<T>(string path, T value)
+    {
+        var tempPath = path + ".tmp";
+        File.WriteAllText(tempPath, JsonSerializer.Serialize(value, JsonOptions));
+        File.Move(tempPath, path, overwrite: true);
     }
 }

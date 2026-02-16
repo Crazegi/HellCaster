@@ -6,6 +6,7 @@ public sealed class GameEngine
     private const float MaxRayDistance = 4200f;
     private const float PlayerRadius = 14f;
     private const float ShootCooldown = 0.16f;
+    private const float EnemyHitAssistRadius = 4.5f;
 
     private readonly List<Enemy> enemies = [];
     private readonly List<Bullet> bullets = [];
@@ -21,6 +22,7 @@ public sealed class GameEngine
     private int checkpointIndex;
     private float shootTimer;
     private float spawnTimer;
+    private float levelElapsedTime;
     private float muzzleFlash;
     private float gameOverTimer;
     private float levelAdvanceTimer;
@@ -38,6 +40,9 @@ public sealed class GameEngine
     private float[] rayShades = [];
     private float[] rayTextureU = [];
     private int[] rayMaterialIds = [];
+    private SpriteRenderView[] cachedSprites = [];
+    private bool renderCacheDirty = true;
+    private Random levelRandom = new(1337);
 
     private Player player = new(0f, 0f, PlayerRadius, 100, 0f);
 
@@ -45,6 +50,7 @@ public sealed class GameEngine
     public int RayCount { get; private set; } = 320;
     public float WorldWidth => currentLevel.Width * TileSize;
     public float WorldHeight => currentLevel.Height * TileSize;
+    public bool IsGameOver => player.Health <= 0;
 
     public void StartNewCampaign(int seed, DifficultyMode selectedDifficulty)
     {
@@ -61,30 +67,49 @@ public sealed class GameEngine
 
     public void LoadFromSave(SaveGameData save)
     {
+        ArgumentNullException.ThrowIfNull(save);
+
         campaignSeed = save.CampaignSeed;
         difficulty = save.Difficulty;
-        levelIndex = save.LevelIndex;
-        score = save.Score;
-        totalKills = save.TotalKills;
+        levelIndex = Math.Max(1, save.LevelIndex);
+        score = Math.Max(0, save.Score);
+        totalKills = Math.Max(0, save.TotalKills);
         achievements = save.Achievements;
         challenges = save.Challenges;
 
         currentLevel = LevelGenerator.Create(campaignSeed, levelIndex, difficulty);
         ResetRuntimeForLevel(resetHealth: false);
 
-        player.X = save.PlayerX;
-        player.Y = save.PlayerY;
-        player.Angle = save.PlayerAngle;
-        player.Health = save.PlayerHealth;
+        var minWorldX = TileSize;
+        var maxWorldX = WorldWidth - TileSize;
+        var minWorldY = TileSize;
+        var maxWorldY = WorldHeight - TileSize;
+
+        player.X = Math.Clamp(save.PlayerX, minWorldX, maxWorldX);
+        player.Y = Math.Clamp(save.PlayerY, minWorldY, maxWorldY);
+        player.Angle = NormalizeAngle(save.PlayerAngle);
+        player.Health = Math.Clamp(save.PlayerHealth, 0, HealthByDifficulty(difficulty) + 60);
+
+        if (IsWallAt(player.X, player.Y, player.Radius))
+        {
+            player.X = currentLevel.Start.X * TileSize;
+            player.Y = currentLevel.Start.Y * TileSize;
+        }
+
         checkpointIndex = Math.Clamp(save.CheckpointIndex, 0, currentLevel.Checkpoints.Count);
-        levelKills = save.LevelKills;
-        objectiveComplete = save.LevelKills >= currentLevel.KillTarget;
+        levelKills = Math.Clamp(save.LevelKills, 0, currentLevel.KillTarget);
+        objectiveComplete = levelKills >= currentLevel.KillTarget;
+        renderCacheDirty = true;
 
         AddEvent("Save loaded.");
     }
 
     public void ApplySettings(GameSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var safeScreenWidth = Math.Max(320, settings.ScreenWidth);
+
         var qualityBase = settings.Quality switch
         {
             QualityMode.Low => 120,
@@ -95,10 +120,10 @@ public sealed class GameEngine
 
         var widthDriven = settings.Quality switch
         {
-            QualityMode.Low => settings.ScreenWidth / 9,
-            QualityMode.Medium => settings.ScreenWidth / 7,
-            QualityMode.High => settings.ScreenWidth / 6,
-            _ => settings.ScreenWidth / 5
+            QualityMode.Low => safeScreenWidth / 9,
+            QualityMode.Medium => safeScreenWidth / 7,
+            QualityMode.High => safeScreenWidth / 6,
+            _ => safeScreenWidth / 5
         };
 
         RayCount = settings.Quality switch
@@ -114,10 +139,13 @@ public sealed class GameEngine
         rayShades = new float[RayCount];
         rayTextureU = new float[RayCount];
         rayMaterialIds = new int[RayCount];
+        renderCacheDirty = true;
     }
 
     public SaveGameData CreateSaveData(string playerName)
     {
+        var safePlayerName = string.IsNullOrWhiteSpace(playerName) ? "Player" : playerName.Trim();
+
         return new SaveGameData(
             campaignSeed,
             levelIndex,
@@ -135,7 +163,7 @@ public sealed class GameEngine
             DateTime.UtcNow,
             achievements,
             challenges,
-            playerName);
+                safePlayerName);
     }
 
     public bool TryConsumeAutosaveFlag(out SaveGameData? save, string playerName)
@@ -153,7 +181,14 @@ public sealed class GameEngine
 
     public void Update(InputState input, float dt)
     {
-        dt = MathF.Min(dt, 0.033f);
+        if (dt <= 0f)
+        {
+            return;
+        }
+
+        dt = Math.Clamp(dt, 0f, 0.033f);
+        levelElapsedTime += dt;
+        renderCacheDirty = true;
         muzzleFlash = MathF.Max(0f, muzzleFlash - dt * 5f);
 
         if (player.Health <= 0)
@@ -178,29 +213,42 @@ public sealed class GameEngine
         UpdateEnemies(dt);
         SpawnEnemies(dt);
         UpdateCheckpointAndExitState();
-        CastRaysAndCacheSprites(out _);
     }
 
     public GameSnapshot GetSnapshot()
     {
-        CastRaysAndCacheSprites(out var sprites);
+        EnsureRenderCache();
 
         var checkpointLeft = Math.Max(0, currentLevel.Checkpoints.Count - checkpointIndex);
         var objectiveText = objectiveComplete
             ? "Objective done. Reach exit portal."
             : $"Eliminate {currentLevel.KillTarget - levelKills} more enemies.";
 
+        var enemyViews = new EntityView[enemies.Count];
+        for (var i = 0; i < enemies.Count; i++)
+        {
+            var enemy = enemies[i];
+            enemyViews[i] = new EntityView(enemy.X, enemy.Y, enemy.Radius, enemy.Health);
+        }
+
+        var bulletViews = new BulletView[bullets.Count];
+        for (var i = 0; i < bullets.Count; i++)
+        {
+            var bullet = bullets[i];
+            bulletViews[i] = new BulletView(bullet.X, bullet.Y, bullet.Radius, bullet.VelocityX, bullet.VelocityY, bullet.Life);
+        }
+
         return new GameSnapshot(
             WorldWidth,
             WorldHeight,
             new EntityView(player.X, player.Y, player.Radius, player.Health),
-            enemies.Select(enemy => new EntityView(enemy.X, enemy.Y, enemy.Radius, enemy.Health)).ToArray(),
-            bullets.Select(b => new BulletView(b.X, b.Y, b.Radius, b.VelocityX, b.VelocityY, b.Life)).ToArray(),
-            rayDistances.ToArray(),
-            rayShades.ToArray(),
-            rayTextureU.ToArray(),
-            rayMaterialIds.ToArray(),
-            sprites,
+            enemyViews,
+            bulletViews,
+            rayDistances,
+            rayShades,
+            rayTextureU,
+            rayMaterialIds,
+            cachedSprites,
             player.Angle,
             Fov,
             levelIndex,
@@ -256,6 +304,8 @@ public sealed class GameEngine
         shootTimer = 0f;
         muzzleFlash = 0f;
         spawnTimer = 1f;
+        levelElapsedTime = 0f;
+        levelRandom = CreateLevelRandom(campaignSeed, currentLevel.LevelSeed, levelIndex, difficulty);
         gameOverTimer = 0f;
         levelAdvanceTimer = 0f;
         exitActivatedAnnounced = false;
@@ -267,7 +317,19 @@ public sealed class GameEngine
         tookDamageThisLevel = false;
         shotsFired = 0;
         shotsHit = 0;
-        CastRaysAndCacheSprites(out _);
+        renderCacheDirty = true;
+    }
+
+    private void EnsureRenderCache()
+    {
+        if (!renderCacheDirty)
+        {
+            return;
+        }
+
+        CastRaysAndCacheSprites(out var sprites);
+        cachedSprites = sprites.ToArray();
+        renderCacheDirty = false;
     }
 
     private void AdvanceLevel()
@@ -407,7 +469,7 @@ public sealed class GameEngine
 
                 if (TryHitEnemyAlongSegment(prevX, prevY, bullet.X, bullet.Y, out var hitEnemyIndex))
                 {
-                    HandleEnemyHit(i, hitEnemyIndex, ref bullet);
+                    HandleEnemyHit(hitEnemyIndex, ref bullet);
                     break;
                 }
             }
@@ -433,7 +495,7 @@ public sealed class GameEngine
         {
             var enemy = enemies[i];
             var distance = DistancePointToSegmentSquared(enemy.X, enemy.Y, x1, y1, x2, y2);
-            var radius = enemy.Radius + 3f;
+            var radius = enemy.Radius + EnemyHitAssistRadius;
             if (distance > radius * radius)
             {
                 continue;
@@ -452,27 +514,18 @@ public sealed class GameEngine
         return enemyIndex >= 0;
     }
 
-    private void HandleEnemyHit(int bulletIndex, int enemyIndex, ref Bullet bullet)
+    private void HandleEnemyHit(int enemyIndex, ref Bullet bullet)
     {
         shotsHit++;
         var enemy = enemies[enemyIndex];
-        enemy.Health -= enemy.Kind switch
-        {
-            "enemy-brute" => 28f,
-            _ => 35f
-        };
+        enemy.Health -= EnemyDamageByType(enemy.Kind);
 
         bullet.Life = 0f;
 
         if (enemy.Health <= 0f)
         {
             enemies.RemoveAt(enemyIndex);
-            score += enemy.Kind switch
-            {
-                "enemy-brute" => 15,
-                "enemy-scout" => 12,
-                _ => 10
-            };
+            score += EnemyScoreByType(enemy.Kind);
             totalKills++;
             levelKills++;
             if (!achievements.FirstBlood)
@@ -508,12 +561,7 @@ public sealed class GameEngine
             }
 
             var speed = EnemySpeedByDifficulty(difficulty);
-            speed *= enemy.Kind switch
-            {
-                "enemy-scout" => 1.28f,
-                "enemy-brute" => 0.78f,
-                _ => 1f
-            };
+            speed *= EnemySpeedMultiplierByType(enemy.Kind);
             var nextX = enemy.X + dx * speed * dt;
             var nextY = enemy.Y + dy * speed * dt;
 
@@ -569,8 +617,8 @@ public sealed class GameEngine
         {
             for (var tries = 0; tries < 40; tries++)
             {
-                var x = Random.Shared.Next(1, currentLevel.Width - 1);
-                var y = Random.Shared.Next(1, currentLevel.Height - 1);
+                var x = levelRandom.Next(1, currentLevel.Width - 1);
+                var y = levelRandom.Next(1, currentLevel.Height - 1);
                 if (GetMap(x, y) != 0)
                 {
                     continue;
@@ -585,15 +633,15 @@ public sealed class GameEngine
                     continue;
                 }
 
-                var roll = Random.Shared.NextDouble();
+                var roll = levelRandom.NextDouble();
                 var kind = roll switch
                 {
-                    < 0.2 => "enemy-scout",
-                    < 0.35 => "enemy-brute",
-                    _ => "enemy"
+                    < 0.2 => EnemyKind.Scout,
+                    < 0.35 => EnemyKind.Brute,
+                    _ => EnemyKind.Grunt
                 };
-                var health = EnemyHealthByDifficulty(difficulty) * (kind == "enemy-brute" ? 1.5f : kind == "enemy-scout" ? 0.7f : 1f);
-                var radius = kind == "enemy-brute" ? 15f : 11.5f;
+                var health = EnemyHealthByDifficulty(difficulty) * EnemyHealthMultiplierByType(kind);
+                var radius = EnemyRadiusByType(kind);
 
                 enemies.Add(new Enemy(wx, wy, radius, health, 0f, kind));
                 break;
@@ -754,7 +802,7 @@ public sealed class GameEngine
         var spriteList = new List<SpriteRenderView>();
         foreach (var enemy in enemies)
         {
-            AddSprite(enemy.X, enemy.Y, enemy.Health, enemy.Kind, spriteList);
+            AddSprite(enemy.X, enemy.Y, enemy.Health, EnemySpriteKind(enemy.Kind), spriteList);
         }
 
         for (var i = checkpointIndex; i < currentLevel.Checkpoints.Count; i++)
@@ -765,7 +813,8 @@ public sealed class GameEngine
 
         AddSprite(currentLevel.Exit.X * TileSize, currentLevel.Exit.Y * TileSize, 100f, objectiveComplete ? "exit-open" : "exit-locked", spriteList);
 
-        sprites = spriteList.OrderByDescending(s => s.Depth).ToArray();
+        spriteList.Sort((left, right) => right.Depth.CompareTo(left.Depth));
+        sprites = spriteList;
     }
 
     private void AddSprite(float worldX, float worldY, float health, string kind, List<SpriteRenderView> spriteList)
@@ -833,7 +882,7 @@ public sealed class GameEngine
             achievements = achievements with { Survivor = true };
         }
 
-        if (levelKills >= currentLevel.KillTarget && spawnTimer > 0.6f)
+        if (levelKills >= currentLevel.KillTarget && levelElapsedTime <= FastClearTargetSeconds(difficulty, levelIndex))
         {
             challenges = challenges with { FastClear = true };
         }
@@ -953,6 +1002,66 @@ public sealed class GameEngine
         _ => 0.72f
     };
 
+    private static float FastClearTargetSeconds(DifficultyMode selectedDifficulty, int currentLevelIndex)
+    {
+        var baseSeconds = selectedDifficulty switch
+        {
+            DifficultyMode.Easy => 120f,
+            DifficultyMode.Medium => 105f,
+            DifficultyMode.Hard => 95f,
+            _ => 85f
+        };
+
+        return MathF.Max(55f, baseSeconds - (currentLevelIndex - 1) * 2.5f);
+    }
+
+    private static Random CreateLevelRandom(int campaignSeedValue, int levelSeedValue, int currentLevelIndex, DifficultyMode selectedDifficulty)
+    {
+        var hash = HashCode.Combine(campaignSeedValue, levelSeedValue, currentLevelIndex, (int)selectedDifficulty, 0x6A09E667);
+        return new Random(hash);
+    }
+
+    private static float EnemyHealthMultiplierByType(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Scout => 0.7f,
+        EnemyKind.Brute => 1.5f,
+        _ => 1f
+    };
+
+    private static float EnemySpeedMultiplierByType(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Scout => 1.28f,
+        EnemyKind.Brute => 0.78f,
+        _ => 1f
+    };
+
+    private static float EnemyRadiusByType(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Brute => 18f,
+        EnemyKind.Scout => 13f,
+        _ => 14.25f
+    };
+
+    private static float EnemyDamageByType(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Brute => 28f,
+        _ => 35f
+    };
+
+    private static int EnemyScoreByType(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Brute => 15,
+        EnemyKind.Scout => 12,
+        _ => 10
+    };
+
+    private static string EnemySpriteKind(EnemyKind kind) => kind switch
+    {
+        EnemyKind.Scout => "enemy-scout",
+        EnemyKind.Brute => "enemy-brute",
+        _ => "enemy"
+    };
+
     private sealed record Player(float X, float Y, float Radius, int Health, float Angle)
     {
         public float X { get; set; } = X;
@@ -962,14 +1071,21 @@ public sealed class GameEngine
         public float Angle { get; set; } = Angle;
     }
 
-    private sealed record Enemy(float X, float Y, float Radius, float Health, float DamageCooldown, string Kind)
+    private enum EnemyKind
+    {
+        Grunt,
+        Scout,
+        Brute
+    }
+
+    private sealed record Enemy(float X, float Y, float Radius, float Health, float DamageCooldown, EnemyKind Kind)
     {
         public float X { get; set; } = X;
         public float Y { get; set; } = Y;
         public float Radius { get; } = Radius;
         public float Health { get; set; } = Health;
         public float DamageCooldown { get; set; } = DamageCooldown;
-        public string Kind { get; } = Kind;
+        public EnemyKind Kind { get; } = Kind;
     }
 
     private sealed record Bullet(float X, float Y, float VelocityX, float VelocityY, float Radius, float Life)
