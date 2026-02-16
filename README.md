@@ -35,6 +35,27 @@ HellCaster is a custom-built first-person shooter that delivers classic corridor
 
 ---
 
+## 🆕 What's New in v2.0.0
+
+- 🖱️ **True 360° mouse look** with cursor recentering/capture for uninterrupted turning
+- 🧱 **Cleaner wall rendering near close range** with improved projection handling and near-wall LOD smoothing
+- 🌌 **Perspective floor/ceiling shading** for stronger depth perception and classic retro banding feel
+- 👾 **Better sprite clipping against wall depth** to reduce billboard bleed-through
+- 🎯 **Easier shooting feel** with slightly larger enemies and adjusted hit assist
+- 🧠 **Deterministic per-level enemy spawn RNG** for reproducible seeded runs
+- 🏁 **Fast Clear challenge uses true level elapsed time** instead of spawn timer proxy
+- ⚙️ **Selective multicore parallelization** in raycasting and pixel fill hot paths
+- 🚀 **Lower per-frame overhead** via snapshot allocation reductions and timing loop improvements
+- 💾 **Safer persistence** with malformed JSON fallback handling and atomic writes
+
+### v2.0.0 release assets
+
+- Windows executable: [HellCaster-v2.0.0-win-x64.exe](https://github.com/Crazegi/HellCaster/releases/download/v2.0.0/HellCaster-v2.0.0-win-x64.exe)
+- Full package (exe + required files): [HellCaster-v2.0.0-win-x64.zip](https://github.com/Crazegi/HellCaster/releases/download/v2.0.0/HellCaster-v2.0.0-win-x64.zip)
+- Release page: [v2.0.0](https://github.com/Crazegi/HellCaster/releases/tag/v2.0.0)
+
+---
+
 ## 🚀 Quick Start
 
 ### 1) Build + run (development)
@@ -78,12 +99,13 @@ dotnet run --project src/HellCaster.App/HellCaster.App.csproj
 
 | Category | Included |
 |---|---|
-| Rendering | DDA raycasting, side-aware UVs, bilinear wall sampling, projection-plane scaling |
+| Rendering | DDA raycasting, side-aware UVs, bilinear wall sampling, projection-plane scaling, perspective floor/ceiling shading, near-wall LOD smoothing |
 | Gameplay | Enemy variants, projectile combat, objective+exit progression |
 | World Gen | Seeded maze+rooms, corridor widening, checkpoint pathing |
 | Progression | Difficulty tiers, level advancement, score tracking |
 | Persistence | Save/load, autosave, settings, leaderboard, achievements/challenges |
-| UX | Fullscreen/windowed, resize+maximize, quality presets, POV/FOV setting |
+| UX | Fullscreen/windowed, resize+maximize, quality presets, POV/FOV setting, true 360° mouse look |
+| Performance | Selective multicore ray/pixel parallelization, reduced frame allocations, high-precision frame timing |
 
 ---
 
@@ -207,6 +229,7 @@ Optional variants:
 - Lower quality first, then resolution
 - Lower POV/FOV if scene feels too heavy
 - Keep textures tileable and moderate resolution
+- Multicore systems automatically benefit from selective parallel render/raycast paths in higher workloads
 
 ---
 
