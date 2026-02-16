@@ -10,6 +10,7 @@ using HellCaster.Runtime;
 using IOPath = System.IO.Path;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace HellCaster.App;
 
@@ -18,6 +19,8 @@ public partial class MainWindow : Window
     private const float WallWorldSize = 64f;
     private const int WallTextureSize = 128;
     private const float MouseTurnSensitivity = 0.12f;
+    private const int ParallelPixelRowThreshold = 480;
+    private const int ParallelWallRayThreshold = 240;
 
     private readonly GameEngine game = new();
     private readonly DispatcherTimer timer;
@@ -244,7 +247,7 @@ public partial class MainWindow : Window
             var fov = Math.Clamp(snapshot.Fov, 0.35f, 2.4f);
             var projectionPlane = (float)(width * 0.5 / Math.Tan(fov * 0.5));
 
-            for (var i = 0; i < rayCount; i++)
+            void RenderWallColumn(int i)
             {
                 var dist = Math.Max(0.01f, rays[i]);
                 var projectedWallHeight = Math.Max(8f, (WallWorldSize / dist) * projectionPlane);
@@ -282,6 +285,18 @@ public partial class MainWindow : Window
                     }
                 }
             }
+
+            if (rayCount >= ParallelWallRayThreshold && Environment.ProcessorCount > 1)
+            {
+                Parallel.For(0, rayCount, RenderWallColumn);
+            }
+            else
+            {
+                for (var i = 0; i < rayCount; i++)
+                {
+                    RenderWallColumn(i);
+                }
+            }
         }
 
         sceneBitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, width * 4, 0);
@@ -302,7 +317,7 @@ public partial class MainWindow : Window
 
         var shadeBands = 18f;
 
-        for (var y = 0; y < height; y++)
+        void FillRow(int y)
         {
             var isFloor = y >= half;
             var p = isFloor ? (y - half + 0.5f) : (half - y + 0.5f);
@@ -336,6 +351,18 @@ public partial class MainWindow : Window
 
                 worldX += floorStepX;
                 worldY += floorStepY;
+            }
+        }
+
+        if (height >= ParallelPixelRowThreshold && Environment.ProcessorCount > 1)
+        {
+            Parallel.For(0, height, FillRow);
+        }
+        else
+        {
+            for (var y = 0; y < height; y++)
+            {
+                FillRow(y);
             }
         }
     }
