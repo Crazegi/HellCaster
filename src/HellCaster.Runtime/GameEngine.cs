@@ -11,6 +11,7 @@ public sealed class GameEngine
 
     private readonly List<Enemy> enemies = [];
     private readonly List<Bullet> bullets = [];
+    private readonly List<ImpactFx> impacts = [];
     private readonly Queue<string> recentEvents = new();
 
     private GeneratedLevel currentLevel = LevelGenerator.Create(1337, 1, DifficultyMode.Medium);
@@ -211,6 +212,7 @@ public sealed class GameEngine
 
         UpdatePlayer(input, dt);
         UpdateBullets(dt);
+        UpdateImpacts(dt);
         UpdateEnemies(dt);
         SpawnEnemies(dt);
         UpdateCheckpointAndExitState();
@@ -239,12 +241,20 @@ public sealed class GameEngine
             bulletViews[i] = new BulletView(bullet.X, bullet.Y, bullet.Radius, bullet.VelocityX, bullet.VelocityY, bullet.Life);
         }
 
+        var impactViews = new ImpactView[impacts.Count];
+        for (var i = 0; i < impacts.Count; i++)
+        {
+            var impact = impacts[i];
+            impactViews[i] = new ImpactView(impact.X, impact.Y, impact.Radius, impact.Life, impact.Kind);
+        }
+
         return new GameSnapshot(
             WorldWidth,
             WorldHeight,
             new EntityView(player.X, player.Y, player.Radius, player.Health),
             enemyViews,
             bulletViews,
+            impactViews,
             rayDistances,
             rayShades,
             rayTextureU,
@@ -282,6 +292,7 @@ public sealed class GameEngine
     {
         enemies.Clear();
         bullets.Clear();
+        impacts.Clear();
 
         var startX = currentLevel.Start.X * TileSize;
         var startY = currentLevel.Start.Y * TileSize;
@@ -464,6 +475,7 @@ public sealed class GameEngine
 
                 if (IsWallAt(bullet.X, bullet.Y, bullet.Radius))
                 {
+                    impacts.Add(new ImpactFx(bullet.X, bullet.Y, 8f, 0.22f, "wall-hit"));
                     bullet.Life = 0f;
                     break;
                 }
@@ -484,6 +496,24 @@ public sealed class GameEngine
             }
 
             bullets[i] = bullet;
+        }
+    }
+
+    private void UpdateImpacts(float dt)
+    {
+        for (var i = impacts.Count - 1; i >= 0; i--)
+        {
+            var impact = impacts[i];
+            impact.Life -= dt;
+            impact.Radius += dt * 28f;
+
+            if (impact.Life <= 0f)
+            {
+                impacts.RemoveAt(i);
+                continue;
+            }
+
+            impacts[i] = impact;
         }
     }
 
@@ -520,6 +550,8 @@ public sealed class GameEngine
         shotsHit++;
         var enemy = enemies[enemyIndex];
         enemy.Health -= EnemyDamageByType(enemy.Kind);
+        enemy.HitFlash = 1f;
+        impacts.Add(new ImpactFx(enemy.X, enemy.Y, enemy.Radius * 0.65f, 0.24f, "enemy-hit"));
 
         bullet.Life = 0f;
 
@@ -577,6 +609,8 @@ public sealed class GameEngine
             }
 
             enemy.DamageCooldown -= dt;
+            enemy.HitFlash = MathF.Max(0f, enemy.HitFlash - dt * 3.8f);
+            enemy.MotionPhase = NormalizeAngle(enemy.MotionPhase + dt * (2.2f + EnemySpeedMultiplierByType(enemy.Kind) * 0.75f));
             var playerDx = player.X - enemy.X;
             var playerDy = player.Y - enemy.Y;
             var impact = enemy.Radius + player.Radius + 2f;
@@ -644,7 +678,7 @@ public sealed class GameEngine
                 var health = EnemyHealthByDifficulty(difficulty) * EnemyHealthMultiplierByType(kind);
                 var radius = EnemyRadiusByType(kind);
 
-                enemies.Add(new Enemy(wx, wy, radius, health, 0f, kind));
+                enemies.Add(new Enemy(wx, wy, radius, health, 0f, kind, (float)(levelRandom.NextDouble() * MathF.PI * 2f), 0f));
                 break;
             }
         }
@@ -707,16 +741,16 @@ public sealed class GameEngine
         var spriteList = new List<SpriteRenderView>();
         foreach (var enemy in enemies)
         {
-            AddSprite(enemy.X, enemy.Y, enemy.Health, EnemySpriteKind(enemy.Kind), spriteList);
+            AddSprite(enemy.X, enemy.Y, enemy.Health, EnemySpriteKind(enemy.Kind), enemy.MotionPhase, enemy.HitFlash, spriteList);
         }
 
         for (var i = checkpointIndex; i < currentLevel.Checkpoints.Count; i++)
         {
             var checkpoint = currentLevel.Checkpoints[i];
-            AddSprite(checkpoint.X * TileSize, checkpoint.Y * TileSize, 100f, "checkpoint", spriteList);
+            AddSprite(checkpoint.X * TileSize, checkpoint.Y * TileSize, 100f, "checkpoint", 0f, 0f, spriteList);
         }
 
-        AddSprite(currentLevel.Exit.X * TileSize, currentLevel.Exit.Y * TileSize, 100f, objectiveComplete ? "exit-open" : "exit-locked", spriteList);
+        AddSprite(currentLevel.Exit.X * TileSize, currentLevel.Exit.Y * TileSize, 100f, objectiveComplete ? "exit-open" : "exit-locked", 0f, 0f, spriteList);
 
         spriteList.Sort((left, right) => right.Depth.CompareTo(left.Depth));
         sprites = spriteList;
@@ -827,10 +861,10 @@ public sealed class GameEngine
         }
 
         rayTextureU[i] = Math.Clamp(texU, 0f, 1f);
-        rayMaterialIds[i] = Math.Clamp(hitWallMaterial, 1, 3);
+        rayMaterialIds[i] = Math.Clamp(hitWallMaterial, 1, 4);
     }
 
-    private void AddSprite(float worldX, float worldY, float health, string kind, List<SpriteRenderView> spriteList)
+    private void AddSprite(float worldX, float worldY, float health, string kind, float motionPhase, float hitFlash, List<SpriteRenderView> spriteList)
     {
         var dx = worldX - player.X;
         var dy = worldY - player.Y;
@@ -861,7 +895,7 @@ public sealed class GameEngine
         }
 
         var size = Math.Clamp((TileSize * 320f) / (worldDistance + 0.1f), 14f, 390f);
-        spriteList.Add(new SpriteRenderView(screenX, size, worldDistance, health, kind));
+        spriteList.Add(new SpriteRenderView(screenX, size, worldDistance, health, kind, motionPhase, hitFlash));
     }
 
     private bool IsWallAt(float worldX, float worldY, float radius)
@@ -1091,7 +1125,7 @@ public sealed class GameEngine
         Brute
     }
 
-    private sealed record Enemy(float X, float Y, float Radius, float Health, float DamageCooldown, EnemyKind Kind)
+    private sealed record Enemy(float X, float Y, float Radius, float Health, float DamageCooldown, EnemyKind Kind, float MotionPhase, float HitFlash)
     {
         public float X { get; set; } = X;
         public float Y { get; set; } = Y;
@@ -1099,6 +1133,17 @@ public sealed class GameEngine
         public float Health { get; set; } = Health;
         public float DamageCooldown { get; set; } = DamageCooldown;
         public EnemyKind Kind { get; } = Kind;
+        public float MotionPhase { get; set; } = MotionPhase;
+        public float HitFlash { get; set; } = HitFlash;
+    }
+
+    private sealed record ImpactFx(float X, float Y, float Radius, float Life, string Kind)
+    {
+        public float X { get; } = X;
+        public float Y { get; } = Y;
+        public float Radius { get; set; } = Radius;
+        public float Life { get; set; } = Life;
+        public string Kind { get; } = Kind;
     }
 
     private sealed record Bullet(float X, float Y, float VelocityX, float VelocityY, float Radius, float Life)

@@ -80,6 +80,11 @@ public static class LevelGenerator
                     material = 3;
                 }
 
+                if (openNeighbors >= 1 && random.NextDouble() < 0.09)
+                {
+                    material = 4;
+                }
+
                 tiles[index] = material;
             }
         }

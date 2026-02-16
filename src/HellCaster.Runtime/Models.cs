@@ -93,7 +93,16 @@ public readonly record struct EntityView(float X, float Y, float Radius, float H
 
 public readonly record struct BulletView(float X, float Y, float Radius, float VelocityX, float VelocityY, float Life);
 
-public readonly record struct SpriteRenderView(float ScreenX, float Size, float Depth, float Health, string Kind);
+public readonly record struct ImpactView(float X, float Y, float Radius, float Life, string Kind);
+
+public readonly record struct SpriteRenderView(
+    float ScreenX,
+    float Size,
+    float Depth,
+    float Health,
+    string Kind,
+    float MotionPhase,
+    float HitFlash);
 
 public sealed record GameSnapshot(
     float WorldWidth,
@@ -101,6 +110,7 @@ public sealed record GameSnapshot(
     EntityView Player,
     IReadOnlyList<EntityView> Enemies,
     IReadOnlyList<BulletView> Bullets,
+    IReadOnlyList<ImpactView> Impacts,
     IReadOnlyList<float> WallDistances,
     IReadOnlyList<float> WallShades,
     IReadOnlyList<float> WallTextureU,

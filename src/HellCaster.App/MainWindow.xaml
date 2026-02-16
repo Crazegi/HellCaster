@@ -4,16 +4,46 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="HellCaster: Neon Siege"
+        Title="HellCaster: Infernal Rites"
         Width="1360"
         Height="860"
         ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
-        Background="#0E1118"
+        Background="#12090B"
         KeyDown="Window_KeyDown"
         KeyUp="Window_KeyUp"
         MouseMove="Window_MouseMove"
         MouseDown="Window_MouseDown">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#FF2F141B" />
+            <Setter Property="Foreground" Value="#FFF3DF" />
+            <Setter Property="BorderBrush" Value="#FF8A3D2A" />
+            <Setter Property="BorderThickness" Value="1.2" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="10,4" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#FF190D11" />
+            <Setter Property="Foreground" Value="#FFF0DE" />
+            <Setter Property="BorderBrush" Value="#FF7F3D32" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#FF190D11" />
+            <Setter Property="Foreground" Value="#FFF0DE" />
+            <Setter Property="BorderBrush" Value="#FF7F3D32" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="4,3" />
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#FFD6C2" />
+        </Style>
+    </Window.Resources>
     <Grid>
         <Grid Name="PlayRoot" Visibility="Collapsed">
             <Viewbox Name="GameViewport"
@@ -23,17 +53,17 @@
                 <Canvas Name="GameCanvas"
                         Width="1280"
                         Height="720"
-                        Background="#111624" />
+                    Background="#150D12" />
             </Viewbox>
 
             <Border HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Margin="14"
-                    Background="#B4000000"
+                    Background="#B8180C10"
                     Padding="10"
                     CornerRadius="8">
                 <TextBlock Name="HudText"
-                           Foreground="#E8EFFF"
+                           Foreground="#FFE0CC"
                            FontSize="15"
                            FontFamily="Consolas"
                            Text="HUD"
@@ -43,12 +73,12 @@
             <Border HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="14"
-                    Background="#B4000000"
+                    Background="#B8180C10"
                     Padding="10"
                     CornerRadius="8"
                     Width="360">
                 <TextBlock Name="StatusText"
-                           Foreground="#D0DCFF"
+                           Foreground="#FFCCB6"
                            FontSize="13"
                            FontFamily="Consolas"
                            TextWrapping="Wrap"
@@ -62,16 +92,16 @@
                        FontFamily="Consolas"
                        FontWeight="Bold"
                        FontSize="40"
-                       Foreground="#FFFF7A7A"
+                       Foreground="#FFFF8167"
                        TextAlignment="Center"
                        Text="SYSTEM FAILURE
 Press ESC" />
         </Grid>
 
-        <Grid Name="MenuRoot" Background="#CC090C14">
+        <Grid Name="MenuRoot" Background="#D6110609">
             <Border HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="#E2192234"
+                Background="#EC1E0F14"
                     Padding="20"
                     CornerRadius="10"
                     Width="900">
@@ -83,35 +113,35 @@ Press ESC" />
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" VerticalAlignment="Top">
-                        <TextBlock Text="HellCaster"
-                                   Foreground="#FFFFFF"
+                        <TextBlock Text="HELLCASTER"
+                                   Foreground="#FFF3DF"
                                    FontSize="30"
                                    FontWeight="Bold"
                                    Margin="0,0,0,8" />
-                        <TextBlock Text="Neon Siege"
-                                   Foreground="#8FC4FF"
+                        <TextBlock Text="Infernal Rites"
+                                   Foreground="#FF9E74"
                                    FontSize="18"
                                    Margin="0,0,0,18" />
 
-                        <Button Name="NewGameButton" Content="New Campaign" Click="NewGameButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="NewGameButton" Content="Begin Rite" Click="NewGameButton_Click" Margin="0,0,0,8" Height="34" />
                         <Button Name="LoadGameButton" Content="Load Saved Game" Click="LoadGameButton_Click" Margin="0,0,0,8" Height="34" />
-                        <Button Name="SaveNowButton" Content="Manual Save" Click="SaveNowButton_Click" Margin="0,0,0,8" Height="34" />
-                        <Button Name="OpenSettingsButton" Content="Settings" Click="OpenSettingsButton_Click" Margin="0,0,0,8" Height="34" />
-                        <Button Name="OpenLeaderboardButton" Content="Leaderboard + Achievements" Click="OpenLeaderboardButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="SaveNowButton" Content="Seal Progress" Click="SaveNowButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="OpenSettingsButton" Content="Ritual Settings" Click="OpenSettingsButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="OpenLeaderboardButton" Content="Slayers + Relics" Click="OpenLeaderboardButton_Click" Margin="0,0,0,8" Height="34" />
                         <Button Name="ResumeButton" Content="Resume Game" Click="ResumeButton_Click" Margin="0,10,0,8" Height="34" />
-                        <Button Name="ExitButton" Content="Exit" Click="ExitButton_Click" Margin="0,0,0,8" Height="34" />
+                        <Button Name="ExitButton" Content="Abandon Ritual" Click="ExitButton_Click" Margin="0,0,0,8" Height="34" />
                     </StackPanel>
 
                     <Grid Grid.Column="2">
                         <Grid Name="HomePanel">
                             <StackPanel>
-                                <TextBlock Text="Campaign Briefing"
-                                           Foreground="#FFFFFF"
+                                <TextBlock Text="Ritual Briefing"
+                                           Foreground="#FFF0E1"
                                            FontSize="20"
                                            FontWeight="Bold"
                                            Margin="0,0,0,12" />
                                 <TextBlock Name="HomeInfoText"
-                                           Foreground="#CFDCFF"
+                                           Foreground="#FFCFB6"
                                            FontSize="14"
                                            TextWrapping="Wrap"
                                            Text="Start a run or load your autosaved checkpoint." />
@@ -120,62 +150,62 @@ Press ESC" />
 
                         <Grid Name="SettingsPanel" Visibility="Collapsed">
                             <StackPanel>
-                                <TextBlock Text="Settings"
-                                           Foreground="#FFFFFF"
+                                <TextBlock Text="Ritual Settings"
+                                           Foreground="#FFF0E1"
                                            FontSize="20"
                                            FontWeight="Bold"
                                            Margin="0,0,0,12" />
 
-                                <TextBlock Text="Player Name" Foreground="#DCE8FF" />
+                                <TextBlock Text="Slayer Name" Foreground="#FFD6C2" />
                                 <TextBox Name="PlayerNameTextBox" Margin="0,4,0,10" />
 
-                                <TextBlock Text="Resolution" Foreground="#DCE8FF" />
+                                <TextBlock Text="Resolution" Foreground="#FFD6C2" />
                                 <ComboBox Name="ResolutionComboBox" Margin="0,4,0,10" />
 
-                                <TextBlock Text="Quality" Foreground="#DCE8FF" />
+                                <TextBlock Text="Quality" Foreground="#FFD6C2" />
                                 <ComboBox Name="QualityComboBox" Margin="0,4,0,10" />
 
-                                <TextBlock Text="POV (Field of View)" Foreground="#DCE8FF" />
+                                <TextBlock Text="POV (Field of View)" Foreground="#FFD6C2" />
                                 <ComboBox Name="PovComboBox" Margin="0,4,0,10" />
 
                                 <CheckBox Name="FullscreenCheckBox"
                                           Content="Fullscreen"
-                                          Foreground="#DCE8FF"
+                                          Foreground="#FFD6C2"
                                           Margin="0,2,0,10" />
 
-                                <TextBlock Text="Difficulty" Foreground="#DCE8FF" />
+                                <TextBlock Text="Difficulty" Foreground="#FFD6C2" />
                                 <ComboBox Name="DifficultyComboBox" Margin="0,4,0,10" />
 
-                                <TextBlock Text="Campaign Seed (optional)" Foreground="#DCE8FF" />
+                                <TextBlock Text="Ritual Seed (optional)" Foreground="#FFD6C2" />
                                 <TextBox Name="SeedTextBox" Margin="0,4,0,10" />
 
-                                <Button Content="Apply Settings" Click="ApplySettingsButton_Click" Height="34" Width="150" />
+                                <Button Content="Apply Sigils" Click="ApplySettingsButton_Click" Height="34" Width="150" />
                             </StackPanel>
                         </Grid>
 
                         <Grid Name="LeaderboardPanel" Visibility="Collapsed">
                             <StackPanel>
-                                <TextBlock Text="Leaderboard"
-                                           Foreground="#FFFFFF"
+                                <TextBlock Text="Slayer Ledger"
+                                           Foreground="#FFF0E1"
                                            FontSize="20"
                                            FontWeight="Bold"
                                            Margin="0,0,0,10" />
 
                                 <TextBlock Name="LeaderboardText"
-                                           Foreground="#F2FFBE"
+                                           Foreground="#FFE8B1"
                                            FontFamily="Consolas"
                                            FontSize="13"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,14" />
 
-                                <TextBlock Text="Achievements"
-                                           Foreground="#FFFFFF"
+                                <TextBlock Text="Relics"
+                                           Foreground="#FFF0E1"
                                            FontSize="18"
                                            FontWeight="Bold"
                                            Margin="0,0,0,10" />
 
                                 <TextBlock Name="AchievementsText"
-                                           Foreground="#BCE9FF"
+                                           Foreground="#FFCFB6"
                                            FontFamily="Consolas"
                                            FontSize="13"
                                            TextWrapping="Wrap" />

@@ -55,6 +55,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         InitializeWallTexturePresets();
         LoadExternalWallTextures();
+        ApplyMenuBackgroundTexture();
 
         persistence = new PersistenceService(PersistenceService.GetDefaultRoot());
         settings = persistence.LoadSettings();
@@ -168,6 +169,7 @@ public partial class MainWindow : Window
 
         DrawSprites(snapshot);
         DrawProjectiles(snapshot);
+        DrawImpacts(snapshot);
         DrawCrosshair();
         DrawWeaponModel(snapshot);
         DrawMuzzleFlash(snapshot);
@@ -619,6 +621,7 @@ public partial class MainWindow : Window
         wallTexturePresets[1] = BuildBrickTexture();
         wallTexturePresets[2] = BuildConcreteTexture();
         wallTexturePresets[3] = BuildMetalTexture();
+        wallTexturePresets[4] = BuildMetalTexture();
     }
 
     private void LoadExternalWallTextures()
@@ -626,6 +629,35 @@ public partial class MainWindow : Window
         TryLoadExternalTexture(1, "wall_brick");
         TryLoadExternalTexture(2, "wall_concrete");
         TryLoadExternalTexture(3, "wall_metal");
+        TryLoadExternalTextureFile(4, "wall_pentagram_1.jpg");
+    }
+
+    private void ApplyMenuBackgroundTexture()
+    {
+        var menuPath = TryResolveTexturePath("pentagram_menu.jpg");
+        if (menuPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(menuPath, UriKind.Absolute);
+            image.EndInit();
+            image.Freeze();
+
+            MenuRoot.Background = new ImageBrush(image)
+            {
+                Stretch = Stretch.UniformToFill,
+                Opacity = 0.68
+            };
+        }
+        catch
+        {
+        }
     }
 
     private void TryLoadExternalTexture(int materialId, string baseName)
@@ -660,6 +692,40 @@ public partial class MainWindow : Window
                 return;
             }
         }
+    }
+
+    private void TryLoadExternalTextureFile(int materialId, string fileName)
+    {
+        var texturePath = TryResolveTexturePath(fileName);
+        if (texturePath is null)
+        {
+            return;
+        }
+
+        var loaded = TryLoadTexturePixels(texturePath);
+        if (loaded is not null)
+        {
+            wallTexturePresets[materialId] = loaded;
+        }
+    }
+
+    private string? TryResolveTexturePath(string fileName)
+    {
+        foreach (var dir in textureSearchDirs)
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            var candidate = IOPath.Combine(dir, fileName);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static Color[]? TryLoadTexturePixels(string filePath)
@@ -799,7 +865,8 @@ public partial class MainWindow : Window
             var spriteWidth = sprite.Size * 0.75;
             var left = sprite.ScreenX * columnWidth - spriteWidth * 0.5;
             var right = left + spriteWidth;
-            var top = height * 0.5 - sprite.Size * 0.5;
+            var bob = Math.Sin(sprite.MotionPhase * 2.0) * Math.Clamp(sprite.Size * 0.035, 0, 9);
+            var top = height * 0.5 - sprite.Size * 0.5 - bob;
 
             var xStart = Math.Clamp((int)Math.Floor(left), 0, Math.Max(0, (int)width - 1));
             var xEnd = Math.Clamp((int)Math.Ceiling(right), xStart + 1, Math.Max(xStart + 1, (int)width));
@@ -824,55 +891,164 @@ public partial class MainWindow : Window
 
             var clippedWidth = Math.Max(1, visibleRight - visibleLeft + 1);
 
-            var fill = sprite.Kind switch
+            if (sprite.Kind.StartsWith("enemy", StringComparison.OrdinalIgnoreCase))
             {
-                "enemy" => new SolidColorBrush(Color.FromRgb(191, 66, 66)),
-                "enemy-scout" => new SolidColorBrush(Color.FromRgb(250, 120, 64)),
-                "enemy-brute" => new SolidColorBrush(Color.FromRgb(130, 58, 170)),
-                "checkpoint" => new SolidColorBrush(Color.FromRgb(88, 198, 255)),
-                "exit-open" => new SolidColorBrush(Color.FromRgb(96, 255, 145)),
-                _ => new SolidColorBrush(Color.FromRgb(170, 120, 255))
-            };
-
-            var body = new Rectangle
-            {
-                Width = clippedWidth,
-                Height = sprite.Size,
-                Fill = fill,
-                Stroke = Brushes.Black,
-                StrokeThickness = 2
-            };
-
-            Canvas.SetLeft(body, visibleLeft);
-            Canvas.SetTop(body, top);
-            GameCanvas.Children.Add(body);
-
-            if (sprite.Kind.StartsWith("enemy", StringComparison.OrdinalIgnoreCase) && clippedWidth > 6)
-            {
-                var eyeSize = Math.Max(4, sprite.Size * 0.1);
-                var eyeY = top + sprite.Size * 0.27;
-
-                var eyeLeft = new Ellipse
-                {
-                    Width = eyeSize,
-                    Height = eyeSize,
-                    Fill = Brushes.Yellow
-                };
-                Canvas.SetLeft(eyeLeft, visibleLeft + clippedWidth * 0.28);
-                Canvas.SetTop(eyeLeft, eyeY);
-                GameCanvas.Children.Add(eyeLeft);
-
-                var eyeRight = new Ellipse
-                {
-                    Width = eyeSize,
-                    Height = eyeSize,
-                    Fill = Brushes.Yellow
-                };
-                Canvas.SetLeft(eyeRight, visibleLeft + clippedWidth * 0.62 - eyeSize);
-                Canvas.SetTop(eyeRight, eyeY);
-                GameCanvas.Children.Add(eyeRight);
+                DrawEnemyModel(sprite, visibleLeft, top, clippedWidth);
+                continue;
             }
+
+            DrawObjectiveSprite(sprite, visibleLeft, top, clippedWidth);
         }
+    }
+
+    private void DrawEnemyModel(SpriteRenderView sprite, double visibleLeft, double top, double clippedWidth)
+    {
+        var hit = Math.Clamp(sprite.HitFlash, 0f, 1f);
+        var armor = sprite.Kind switch
+        {
+            "enemy-scout" => Color.FromRgb(203, 66, 34),
+            "enemy-brute" => Color.FromRgb(96, 46, 120),
+            _ => Color.FromRgb(132, 38, 38)
+        };
+
+        var flesh = Color.FromRgb(47, 10, 10);
+        var accent = sprite.Kind switch
+        {
+            "enemy-scout" => Color.FromRgb(255, 161, 72),
+            "enemy-brute" => Color.FromRgb(188, 112, 255),
+            _ => Color.FromRgb(244, 84, 66)
+        };
+
+        var flashMix = (byte)(hit * 180f);
+        var armorBrush = new SolidColorBrush(Color.FromRgb(
+            (byte)Math.Clamp(armor.R + flashMix, 0, 255),
+            (byte)Math.Clamp(armor.G + flashMix * 0.36f, 0, 255),
+            (byte)Math.Clamp(armor.B + flashMix * 0.24f, 0, 255)));
+
+        var core = new Rectangle
+        {
+            Width = clippedWidth,
+            Height = sprite.Size,
+            Fill = new SolidColorBrush(flesh),
+            Stroke = armorBrush,
+            StrokeThickness = Math.Clamp(sprite.Size * 0.04, 1, 4),
+            RadiusX = 6,
+            RadiusY = 6
+        };
+        Canvas.SetLeft(core, visibleLeft);
+        Canvas.SetTop(core, top);
+        GameCanvas.Children.Add(core);
+
+        var chest = new Polygon
+        {
+            Fill = armorBrush,
+            Points =
+            [
+                new Point(visibleLeft + clippedWidth * 0.22, top + sprite.Size * 0.36),
+                new Point(visibleLeft + clippedWidth * 0.50, top + sprite.Size * 0.16),
+                new Point(visibleLeft + clippedWidth * 0.78, top + sprite.Size * 0.36),
+                new Point(visibleLeft + clippedWidth * 0.66, top + sprite.Size * 0.82),
+                new Point(visibleLeft + clippedWidth * 0.34, top + sprite.Size * 0.82)
+            ]
+        };
+        GameCanvas.Children.Add(chest);
+
+        var hornColor = new SolidColorBrush(Color.FromRgb(28, 9, 9));
+        var leftHorn = new Polygon
+        {
+            Fill = hornColor,
+            Points =
+            [
+                new Point(visibleLeft + clippedWidth * 0.14, top + sprite.Size * 0.18),
+                new Point(visibleLeft + clippedWidth * 0.29, top - sprite.Size * 0.09),
+                new Point(visibleLeft + clippedWidth * 0.36, top + sprite.Size * 0.26)
+            ]
+        };
+        var rightHorn = new Polygon
+        {
+            Fill = hornColor,
+            Points =
+            [
+                new Point(visibleLeft + clippedWidth * 0.86, top + sprite.Size * 0.18),
+                new Point(visibleLeft + clippedWidth * 0.71, top - sprite.Size * 0.09),
+                new Point(visibleLeft + clippedWidth * 0.64, top + sprite.Size * 0.26)
+            ]
+        };
+        GameCanvas.Children.Add(leftHorn);
+        GameCanvas.Children.Add(rightHorn);
+
+        var eyeSize = Math.Max(4, sprite.Size * 0.1);
+        var blink = MathF.Abs(MathF.Sin(sprite.MotionPhase * 3.1f));
+        var eyeHeight = Math.Max(2.0, eyeSize * (0.38 + blink * 0.62));
+        var eyeY = top + sprite.Size * 0.30;
+        var eyeBrush = new SolidColorBrush(accent);
+
+        var eyeLeft = new Ellipse
+        {
+            Width = eyeSize,
+            Height = eyeHeight,
+            Fill = eyeBrush
+        };
+        Canvas.SetLeft(eyeLeft, visibleLeft + clippedWidth * 0.29);
+        Canvas.SetTop(eyeLeft, eyeY);
+        GameCanvas.Children.Add(eyeLeft);
+
+        var eyeRight = new Ellipse
+        {
+            Width = eyeSize,
+            Height = eyeHeight,
+            Fill = eyeBrush
+        };
+        Canvas.SetLeft(eyeRight, visibleLeft + clippedWidth * 0.62 - eyeSize);
+        Canvas.SetTop(eyeRight, eyeY);
+        GameCanvas.Children.Add(eyeRight);
+
+        var sigil = new Rectangle
+        {
+            Width = Math.Max(2, clippedWidth * 0.07),
+            Height = sprite.Size * 0.28,
+            Fill = new SolidColorBrush(Color.FromArgb((byte)(170 + hit * 80), accent.R, accent.G, accent.B))
+        };
+        Canvas.SetLeft(sigil, visibleLeft + clippedWidth * 0.5 - sigil.Width * 0.5);
+        Canvas.SetTop(sigil, top + sprite.Size * 0.45);
+        GameCanvas.Children.Add(sigil);
+    }
+
+    private void DrawObjectiveSprite(SpriteRenderView sprite, double visibleLeft, double top, double clippedWidth)
+    {
+        var fill = sprite.Kind switch
+        {
+            "checkpoint" => new SolidColorBrush(Color.FromRgb(115, 52, 170)),
+            "exit-open" => new SolidColorBrush(Color.FromRgb(255, 138, 74)),
+            _ => new SolidColorBrush(Color.FromRgb(84, 56, 122))
+        };
+
+        var body = new Rectangle
+        {
+            Width = clippedWidth,
+            Height = sprite.Size,
+            Fill = fill,
+            Stroke = new SolidColorBrush(Color.FromRgb(20, 10, 10)),
+            StrokeThickness = 2,
+            RadiusX = 8,
+            RadiusY = 8
+        };
+
+        Canvas.SetLeft(body, visibleLeft);
+        Canvas.SetTop(body, top);
+        GameCanvas.Children.Add(body);
+
+        var centerGlow = new Ellipse
+        {
+            Width = Math.Max(8, clippedWidth * 0.34),
+            Height = Math.Max(8, clippedWidth * 0.34),
+            Fill = new SolidColorBrush(sprite.Kind == "exit-open"
+                ? Color.FromArgb(210, 255, 199, 124)
+                : Color.FromArgb(210, 177, 96, 255))
+        };
+        Canvas.SetLeft(centerGlow, visibleLeft + clippedWidth * 0.5 - centerGlow.Width * 0.5);
+        Canvas.SetTop(centerGlow, top + sprite.Size * 0.45 - centerGlow.Height * 0.5);
+        GameCanvas.Children.Add(centerGlow);
     }
 
     private void DrawProjectiles(GameSnapshot snapshot)
@@ -908,20 +1084,65 @@ public partial class MainWindow : Window
                 Y1 = tail.Y,
                 X2 = head.X,
                 Y2 = head.Y,
-                Stroke = new SolidColorBrush(Color.FromArgb(210, 255, 214, 110)),
-                StrokeThickness = 2
+                Stroke = new SolidColorBrush(Color.FromArgb(220, 255, 136, 72)),
+                StrokeThickness = 2.6
             };
             GameCanvas.Children.Add(line);
 
+            var ember = new Line
+            {
+                X1 = (tail.X + head.X) * 0.5,
+                Y1 = (tail.Y + head.Y) * 0.5,
+                X2 = head.X,
+                Y2 = head.Y,
+                Stroke = new SolidColorBrush(Color.FromArgb(220, 255, 218, 170)),
+                StrokeThickness = 1.4
+            };
+            GameCanvas.Children.Add(ember);
+
             var glow = new Ellipse
             {
-                Width = 5,
-                Height = 5,
-                Fill = new SolidColorBrush(Color.FromArgb(245, 255, 255, 220))
+                Width = 7,
+                Height = 7,
+                Fill = new SolidColorBrush(Color.FromArgb(250, 255, 238, 206))
             };
-            Canvas.SetLeft(glow, head.X - 2.5);
-            Canvas.SetTop(glow, head.Y - 2.5);
+            Canvas.SetLeft(glow, head.X - 3.5);
+            Canvas.SetTop(glow, head.Y - 3.5);
             GameCanvas.Children.Add(glow);
+        }
+    }
+
+    private void DrawImpacts(GameSnapshot snapshot)
+    {
+        foreach (var impact in snapshot.Impacts)
+        {
+            var projected = ProjectWorldToScreen(snapshot, impact.X, impact.Y);
+            if (!projected.Visible)
+            {
+                continue;
+            }
+
+            var strength = Math.Clamp(impact.Life / 0.24f, 0f, 1f);
+            var size = Math.Clamp(impact.Radius * 0.9f, 4f, 24f) * (1.0 + (1.0 - strength) * 0.6);
+
+            var color = impact.Kind switch
+            {
+                "enemy-hit" => Color.FromArgb((byte)(180 * strength), 255, 72, 62),
+                _ => Color.FromArgb((byte)(170 * strength), 255, 172, 96)
+            };
+
+            var burst = new Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = new SolidColorBrush(color),
+                Stroke = new SolidColorBrush(Color.FromArgb((byte)(110 * strength), 255, 235, 180)),
+                StrokeThickness = 1
+            };
+
+            Canvas.SetLeft(burst, projected.X - size * 0.5);
+            Canvas.SetTop(burst, projected.Y - size * 0.5);
+            GameCanvas.Children.Add(burst);
         }
     }
 
@@ -937,7 +1158,7 @@ public partial class MainWindow : Window
         {
             Width = GameCanvas.Width,
             Height = GameCanvas.Height,
-            Fill = new SolidColorBrush(Color.FromArgb(alpha, 255, 225, 170))
+            Fill = new SolidColorBrush(Color.FromArgb(alpha, 255, 188, 132))
         };
 
         GameCanvas.Children.Add(flash);
@@ -1104,13 +1325,13 @@ public partial class MainWindow : Window
             : $"Save level {save.LevelIndex} | score {save.Score} | seed {save.CampaignSeed} | {save.Difficulty}";
 
         HomeInfoText.Text =
-            "Goal: kill the level target and reach the exit portal.\n" +
-            "Autosave occurs on checkpoints and level transitions.\n\n" +
-            $"Current profile: {settings.PlayerName}\n" +
+            "Rite objective: purge the marked hostiles and claim the exit sigil.\n" +
+            "Autosave binds at checkpoints and level ascension.\n\n" +
+            $"Current slayer: {settings.PlayerName}\n" +
             $"Resolution: {settings.ScreenWidth}x{settings.ScreenHeight}\n" +
             $"POV: {settings.PovDegrees:0}°\n" +
             $"Difficulty: {settings.Difficulty}\n" +
-            $"Save: {saveInfo}";
+            $"Bound save: {saveInfo}";
 
         LeaderboardText.Text = BuildLeaderboardText();
         AchievementsText.Text = BuildAchievementsText();
