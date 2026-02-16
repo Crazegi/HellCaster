@@ -7,12 +7,5 @@
 *.user
 *.suo
 
-# Release temp output
-release/_publish_temp/
-
-# Release binaries
-release/*.exe
-release/latest/*.exe
-release/latest/*.pdb
-release/*.pdb
-release/latest/**
+# Release outputs
+/release/
